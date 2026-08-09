@@ -3,7 +3,7 @@
 // Deliberately does NOT cache anything sent to an external backend
 // (AI/translate calls) — those need a live network connection anyway.
 
-const CACHE_NAME = 'book-tracker-shell-v7';
+const CACHE_NAME = 'book-tracker-shell-v8';
 const SHELL_FILES = [
   './',
   './index.html',

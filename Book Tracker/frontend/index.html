@@ -162,14 +162,20 @@
   .tb-btn:hover{ background:var(--panel2); }
   .tb-btn.on{ background:var(--panel2); color:var(--signal); }
 
+  @keyframes popIn{
+    0%{ opacity:0; transform:scale(.9) translateY(4px); }
+    100%{ opacity:1; transform:scale(1) translateY(0); }
+  }
   #selPopover{ position:absolute; z-index:30; background:var(--panel2); border:1px solid var(--line);
     border-radius:10px; padding:8px; display:none; flex-direction:column; gap:6px; }
-  #selPopover.show{ display:flex; }
+  #selPopover.show{ display:flex; animation:popIn .16s cubic-bezier(.2,.9,.3,1.3) both; }
   #selPopover .row{ display:flex; gap:6px; align-items:center; }
   #selPopover .swatch{ width:22px; height:22px; }
   #selPopover .ai-btn{ background:var(--panel); border:1px solid var(--line); color:var(--paper);
-    font-size:12px; padding:6px 10px; border-radius:7px; cursor:pointer; white-space:nowrap; }
-  #selPopover .ai-btn:hover{ border-color:var(--signal); color:var(--signal); }
+    font-size:12px; padding:6px 10px; border-radius:7px; cursor:pointer; white-space:nowrap;
+    transition:.15s border-color, .15s color, .15s background; }
+  #selPopover .ai-btn:hover{ border-color:transparent; color:#06110D;
+    background:linear-gradient(90deg,var(--signal),var(--violet)); }
 
   .note-compose{ position:absolute; z-index:30; background:var(--panel2); border:1px solid var(--line);
     border-radius:10px; padding:10px; width:260px; display:none; box-shadow:0 12px 30px rgba(0,0,0,.4); }
@@ -331,6 +337,87 @@
   .prop-row:last-child{ border-bottom:none; }
   .prop-row .k{ color:var(--muted); flex-shrink:0; }
   .prop-row .v{ color:var(--paper); text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  /* ---------- AI PANEL ---------- */
+  @keyframes aiPanelIn{
+    0%{ opacity:0; transform:translateX(-50%) translateY(-6px) scale(.94); }
+    100%{ opacity:1; transform:translateX(-50%) translateY(0) scale(1); }
+  }
+  @keyframes sparkPulse{
+    0%,100%{ opacity:1; transform:scale(1) rotate(0deg); filter:drop-shadow(0 0 0 rgba(51,230,176,0)); }
+    50%{ opacity:.75; transform:scale(1.18) rotate(8deg); filter:drop-shadow(0 0 6px rgba(51,230,176,.7)); }
+  }
+  @keyframes shimmerSweep{
+    0%{ background-position:-200% 0; }
+    100%{ background-position:200% 0; }
+  }
+  @keyframes borderGlow{
+    0%,100%{ box-shadow:0 16px 44px rgba(0,0,0,.45), 0 0 0 1px rgba(51,230,176,.25); }
+    50%{ box-shadow:0 16px 44px rgba(0,0,0,.45), 0 0 0 1px rgba(124,140,255,.4); }
+  }
+  @keyframes resultFadeIn{
+    0%{ opacity:0; transform:translateY(4px); }
+    100%{ opacity:1; transform:translateY(0); }
+  }
+  .ai-panel{
+    position:absolute; left:50%; top:70px; transform:translateX(-50%);
+    width:340px; max-width:88vw; background:var(--panel2); border-radius:14px;
+    z-index:40; display:none; overflow:hidden;
+    animation:aiPanelIn .28s cubic-bezier(.34,1.56,.64,1) both, borderGlow 2.6s ease-in-out infinite;
+  }
+  .ai-panel.show{ display:block; }
+  .ai-panel-head{
+    display:flex; align-items:center; gap:8px; padding:12px 14px; border-bottom:1px solid var(--line);
+    background:linear-gradient(90deg, rgba(51,230,176,.08), rgba(124,140,255,.08));
+  }
+  .ai-spark{
+    font-size:14px; display:inline-block; color:var(--signal);
+    animation:sparkPulse 1.6s ease-in-out infinite;
+  }
+  .ai-panel-label{ font-size:12px; font-weight:600; color:var(--paper); flex:1; letter-spacing:.2px; }
+  .ai-panel-close{ background:transparent; border:none; color:var(--muted); cursor:pointer; font-size:12px;
+    width:22px; height:22px; border-radius:6px; }
+  .ai-panel-close:hover{ background:var(--panel); color:var(--paper); }
+  .ai-panel-body{ padding:16px 14px; max-height:280px; overflow-y:auto; }
+  .ai-loading{ display:flex; flex-direction:column; gap:9px; }
+  .ai-loading.hide{ display:none; }
+  .ai-shimmer{
+    height:11px; border-radius:5px; width:100%;
+    background:linear-gradient(90deg, var(--panel) 25%, #2b3038 50%, var(--panel) 75%);
+    background-size:200% 100%;
+    animation:shimmerSweep 1.3s ease-in-out infinite;
+  }
+  .ai-result{ font-size:13px; line-height:1.65; color:#DEE1E6; white-space:pre-wrap; display:none; }
+  .ai-result.show{ display:block; animation:resultFadeIn .35s ease both; }
+  .ai-panel-actions{ display:flex; justify-content:flex-end; gap:8px; padding:10px 14px; border-top:1px solid var(--line); }
+  .ai-panel-actions button{ font-size:12px; padding:7px 13px; border-radius:7px; border:1px solid var(--line);
+    background:var(--panel); color:var(--paper); cursor:pointer; transition:.12s transform; }
+  .ai-panel-actions button.primary{ background:var(--signal); color:#06110D; border:none; font-weight:600; }
+  .ai-panel-actions button:active{ transform:scale(.94); }
+
+  /* ---------- HIGHLIGHT CREATION FLASH ---------- */
+  @keyframes hlFlash{
+    0%{ box-shadow:0 0 0 4px rgba(51,230,176,.55); }
+    100%{ box-shadow:0 0 0 0 rgba(51,230,176,0); }
+  }
+  mark.hl-flash{ animation:hlFlash .6s ease-out; }
+  @keyframes rectFlash{
+    0%{ box-shadow:0 0 0 6px rgba(51,230,176,.55); }
+    100%{ box-shadow:0 0 0 0 rgba(51,230,176,0); }
+  }
+  .rect-hl.rect-flash{ animation:rectFlash .6s ease-out; }
+
+  /* ---------- GLOBAL INTERACTION POLISH ---------- */
+  .icon-btn:active, .tb-btn:active, .open-btn:active, .ghost-btn:active, .modal-close:active{ transform:scale(.94); }
+  .icon-btn, .tb-btn, .swatch, .ai-btn, .card{ transition:transform .12s ease, border-color .15s ease, background .15s ease; }
+  .swatch{ transition:transform .12s ease; }
+  .swatch:hover{ transform:scale(1.12); }
+  @keyframes modalIn{
+    0%{ opacity:0; transform:scale(.95) translateY(6px); }
+    100%{ opacity:1; transform:scale(1) translateY(0); }
+  }
+  .modal-overlay.show .modal{ animation:modalIn .22s cubic-bezier(.2,.9,.3,1.2) both; }
+  .toast{ transition:opacity .3s cubic-bezier(.34,1.4,.64,1), transform .3s cubic-bezier(.34,1.4,.64,1); }
 </style>
 </head>
 <body>
@@ -343,7 +430,7 @@
     <div class="topbar">
       <div class="brand"><div class="brand-mark"></div><div class="brand-name">Book Tracker</div></div>
       <div class="topbar-right">
-        <div class="version-badge mono" id="versionBadge">v0.7.0</div>
+        <div class="version-badge mono" id="versionBadge">v0.8.0</div>
         <button class="google-btn" id="googleBtn">
           <span>Sign in with Google</span>
           <div class="tooltip">Coming soon — enables cloud sync across devices</div>
@@ -497,11 +584,30 @@
         </div>
 
         <div id="noteCompose" class="note-compose">
-          <div id="noteLoading" class="loading" style="display:none;">Thinking…</div>
           <textarea id="noteText" placeholder="Write a note…"></textarea>
           <div class="row">
             <button id="noteCancel">Cancel</button>
             <button class="primary" id="noteSave">Save</button>
+          </div>
+        </div>
+
+        <div id="aiPanel" class="ai-panel">
+          <div class="ai-panel-head">
+            <span class="ai-spark">✦</span>
+            <span class="ai-panel-label" id="aiPanelLabel">Thinking</span>
+            <button class="ai-panel-close" id="aiPanelClose">✕</button>
+          </div>
+          <div class="ai-panel-body">
+            <div class="ai-loading" id="aiLoading">
+              <div class="ai-shimmer"></div>
+              <div class="ai-shimmer" style="width:70%"></div>
+              <div class="ai-shimmer" style="width:85%"></div>
+            </div>
+            <div class="ai-result" id="aiResult"></div>
+          </div>
+          <div class="ai-panel-actions" id="aiPanelActions" style="display:none;">
+            <button id="aiCopy">Copy</button>
+            <button class="primary" id="aiSaveNote">Save as note</button>
           </div>
         </div>
 
@@ -819,6 +925,8 @@ async function openBook(meta, file){
   document.getElementById('moreMenu').classList.remove('show');
   document.getElementById('findBar').classList.remove('show');
   document.getElementById('drawer').classList.remove('open');
+  document.getElementById('aiPanel').classList.remove('show');
+  document.getElementById('selPopover').classList.remove('show');
   stopTTS();
   screen('reader');
   updateProgressUI();
@@ -1464,13 +1572,18 @@ document.getElementById('selPopover').addEventListener('click', async (e)=>{
     const start = textOffsetOf(activeSelContainer, activeSelRange.startContainer, activeSelRange.startOffset);
     const end = textOffsetOf(activeSelContainer, activeSelRange.endContainer, activeSelRange.endOffset);
     const text = activeSelRange.toString();
-    wrapRangeWithMark(activeSelRange, c);
-    const record = {id:'h'+Date.now(), color:c, start, end, text: text.slice(0,140), page: activeSelPdfPage||null};
+    const id = 'h'+Date.now();
+    wrapRangeWithMark(activeSelRange, c, id);
+    const record = {id, color:c, start, end, text: text.slice(0,140), page: activeSelPdfPage||null};
     current.highlights = current.highlights||[];
     current.highlights.push(record);
     saveMeta(); renderDrawer();
     document.getElementById('selPopover').classList.remove('show');
     window.getSelection().removeAllRanges();
+    document.querySelectorAll(`mark[data-hl-id="${id}"]`).forEach(m=>{
+      m.classList.add('hl-flash');
+      m.addEventListener('animationend', ()=>m.classList.remove('hl-flash'), {once:true});
+    });
   } else if(aiBtn){
     const action = aiBtn.dataset.action;
     document.getElementById('selPopover').classList.remove('show');
@@ -1540,8 +1653,6 @@ function showNoteCompose(rect, hostRect){
   box.style.left = Math.min(window.innerWidth-280, Math.max(4,rect.left - hostRect.left)) + 'px';
   box.style.top = (rect.bottom - hostRect.top + 10) + 'px';
   box.classList.add('show');
-  document.getElementById('noteLoading').style.display = 'none';
-  document.getElementById('noteText').style.display = '';
   document.getElementById('noteText').value = '';
   document.getElementById('noteText').focus();
 }
@@ -1569,19 +1680,26 @@ document.getElementById('noteSave').addEventListener('click', ()=>{
 });
 
 /* ============ AI ACTIONS (explain / summarize / translate) ============ */
+let currentAIResult = null; // {text, action, sourceText, container, pdfPage}
+
 async function runAIAction(action, text, pdfPage){
   if(!settings.backendUrl){
     toast('Add your AI backend URL in Settings (⚙) first.');
     return;
   }
-  const hostRect = document.getElementById('viewerHost').getBoundingClientRect();
-  const box = document.getElementById('noteCompose');
-  box.style.left = '50%'; box.style.top = '80px'; box.style.transform = 'translateX(-50%)'; box.style.width='320px';
-  box.classList.add('show');
-  document.getElementById('noteText').style.display = 'none';
-  document.getElementById('noteLoading').style.display = 'block';
-  document.getElementById('noteLoading').textContent =
-    action==='translate' ? 'Translating…' : action==='summarize' ? 'Summarizing…' : action==='define' ? 'Looking up…' : 'Explaining…';
+  const labels = { translate:'Translating', summarize:'Summarizing', define:'Looking up', explain:'Explaining' };
+  const panel = document.getElementById('aiPanel');
+  const loading = document.getElementById('aiLoading');
+  const result = document.getElementById('aiResult');
+  const actions = document.getElementById('aiPanelActions');
+
+  document.getElementById('aiPanelLabel').textContent = labels[action] || 'Thinking';
+  result.classList.remove('show');
+  result.textContent = '';
+  loading.classList.remove('hide');
+  actions.style.display = 'none';
+  panel.classList.add('show');
+  currentAIResult = null;
 
   try{
     let url, body;
@@ -1603,19 +1721,50 @@ async function runAIAction(action, text, pdfPage){
     if(!resp.ok) throw new Error(data.error || 'Request failed');
     const resultText = data.summary || data.explanation || data.translated || data.definition || '(no result)';
 
-    document.getElementById('noteLoading').style.display = 'none';
-    document.getElementById('noteText').style.display = '';
-    document.getElementById('noteText').value = resultText;
-    box.style.transform = 'translateX(-50%)';
+    const labelDone = { translate:'Translation', summarize:'Summary', define:'Definition', explain:'Explanation' };
+    document.getElementById('aiPanelLabel').textContent = labelDone[action] || 'Result';
+    loading.classList.add('hide');
+    result.textContent = resultText;
+    result.classList.add('show');
+    actions.style.display = 'flex';
 
-    pendingNoteAnchor = { range: {start: textOffsetOf(activeSelContainer, activeSelRange.startContainer, activeSelRange.startOffset)},
-      text, container: activeSelContainer, pdfPage };
+    currentAIResult = {
+      text: resultText,
+      sourceText: text,
+      container: activeSelContainer,
+      pdfPage
+    };
   } catch(err){
     console.error(err);
-    document.getElementById('noteCompose').classList.remove('show');
+    panel.classList.remove('show');
     toast('AI request failed: ' + err.message);
   }
 }
+document.getElementById('aiPanelClose').addEventListener('click', ()=>{
+  document.getElementById('aiPanel').classList.remove('show');
+});
+document.getElementById('aiCopy').addEventListener('click', async ()=>{
+  if(!currentAIResult) return;
+  try{
+    await navigator.clipboard.writeText(currentAIResult.text);
+    toast('Copied to clipboard');
+  }catch(e){ toast('Could not copy — select and copy manually.'); }
+});
+document.getElementById('aiSaveNote').addEventListener('click', ()=>{
+  if(!currentAIResult) return;
+  const record = {
+    id:'n'+Date.now(), text: currentAIResult.text,
+    quote: currentAIResult.sourceText.slice(0,140),
+    anchorStart: activeSelRange ? textOffsetOf(currentAIResult.container, activeSelRange.startContainer, activeSelRange.startOffset) : 0,
+    page: currentAIResult.pdfPage || null,
+    created: Date.now()
+  };
+  current.notes = current.notes||[];
+  current.notes.push(record);
+  saveMeta(); renderDrawer();
+  document.getElementById('aiPanel').classList.remove('show');
+  toast('Saved as note');
+});
 
 /* image note/highlight: click-drag to draw rect */
 function attachImageDrawHandlers(){
@@ -1637,6 +1786,11 @@ function attachImageDrawHandlers(){
     current.highlights = current.highlights||[];
     current.highlights.push(rec);
     saveMeta(); renderImageHighlights(); renderDrawer();
+    const newRect = document.querySelector(`.rect-hl[data-hl-id="${rec.id}"]`);
+    if(newRect){
+      newRect.classList.add('rect-flash');
+      newRect.addEventListener('animationend', ()=>newRect.classList.remove('rect-flash'), {once:true});
+    }
   };
 }
 function renderImageHighlights(){
@@ -1807,6 +1961,9 @@ document.getElementById('readerSettingsToggle').addEventListener('click', ()=>{
 document.addEventListener('click', (e)=>{
   if(!e.target.closest('#readerSettingsPop') && !e.target.closest('#readerSettingsToggle')){
     document.getElementById('readerSettingsPop').classList.remove('show');
+  }
+  if(!e.target.closest('#aiPanel') && !e.target.closest('.ai-btn')){
+    document.getElementById('aiPanel').classList.remove('show');
   }
 });
 document.querySelectorAll('[data-theme]').forEach(btn=>{
