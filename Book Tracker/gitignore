@@ -1,0 +1,10 @@
+# Never commit real secrets — only .env.example should be tracked
+.env
+
+# Installed packages — recreated by `npm install`, shouldn't be in git
+node_modules/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.log
