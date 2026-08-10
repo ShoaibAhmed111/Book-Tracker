@@ -11,6 +11,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
   :root{
     --ink:#0B0D10; --panel:#14171C; --panel2:#1A1E25; --line:#262B33;
@@ -74,6 +75,9 @@
   .format-chip{ font-size:10px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted);
     border:1px solid var(--line); padding:3px 7px; border-radius:5px; }
   .stored-chip{ font-size:9px; color:var(--signal); margin-left:5px; }
+  .card-delete{ background:transparent; border:none; color:var(--muted); font-size:13px; cursor:pointer;
+    width:22px; height:22px; border-radius:6px; flex-shrink:0; opacity:.55; transition:.15s; }
+  .card-delete:hover{ opacity:1; background:rgba(255,106,106,.15); color:var(--danger); transform:scale(1.08); }
   .ring{ width:34px; height:34px; flex-shrink:0; }
   .card-title{ font-family:'Fraunces',serif; font-size:16px; font-weight:500; line-height:1.3; margin:0 0 6px;
     overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
@@ -418,6 +422,19 @@
   }
   .modal-overlay.show .modal{ animation:modalIn .22s cubic-bezier(.2,.9,.3,1.2) both; }
   .toast{ transition:opacity .3s cubic-bezier(.34,1.4,.64,1), transform .3s cubic-bezier(.34,1.4,.64,1); }
+  @media print{
+    body.printing-text #app > *{ display:none !important; }
+    body.printing-text #reader{ display:block !important; position:static !important; }
+    body.printing-text .progress-rail, body.printing-text .reader-topbar, body.printing-text .find-bar,
+    body.printing-text .toolbar, body.printing-text .drawer, body.printing-text .sidebar{ display:none !important; }
+    body.printing-text .reader-body{ display:block !important; }
+    body.printing-text .content-wrap{ display:block !important; background:#fff !important; overflow:visible !important; height:auto !important; }
+    body.printing-text .content-inner{
+      color:#111 !important; max-width:100% !important; padding:0 !important;
+      font-family:Georgia, 'Times New Roman', serif !important; font-size:12pt !important;
+    }
+    body.printing-text mark{ -webkit-print-color-adjust:exact; print-color-adjust:exact; color:#111 !important; }
+  }
 </style>
 </head>
 <body>
@@ -430,7 +447,7 @@
     <div class="topbar">
       <div class="brand"><div class="brand-mark"></div><div class="brand-name">Book Tracker</div></div>
       <div class="topbar-right">
-        <div class="version-badge mono" id="versionBadge">v0.8.0</div>
+        <div class="version-badge mono" id="versionBadge">v0.9.0</div>
         <button class="google-btn" id="googleBtn">
           <span>Sign in with Google</span>
           <div class="tooltip">Coming soon — enables cloud sync across devices</div>
@@ -473,6 +490,7 @@
     <div class="more-menu" id="moreMenu">
       <button id="menuDownload">⬇ Download original file</button>
       <button id="menuPrint" style="display:none;">🖨 Print</button>
+      <button id="menuConvertPdf" style="display:none;">⇩ Convert to PDF</button>
       <button id="menuProperties" style="display:none;">ℹ️ Document properties</button>
       <div class="sep" id="menuPdfSep" style="display:none;"></div>
       <button id="menuHandTool" style="display:none;">✋ Hand tool (pan)</button>
@@ -671,6 +689,18 @@
     </div>
   </div>
 
+  <!-- CONFIRM MODAL (reusable) -->
+  <div class="modal-overlay" id="confirmOverlay">
+    <div class="modal">
+      <h2 id="confirmTitle">Are you sure?</h2>
+      <p class="sub" id="confirmBody"></p>
+      <div class="modal-actions" style="justify-content:flex-end; gap:10px;">
+        <button class="ghost-btn" id="confirmCancel" style="padding:9px 16px; font-size:13px;">Cancel</button>
+        <button class="modal-close" id="confirmOk" style="background:var(--danger);">Delete</button>
+      </div>
+    </div>
+  </div>
+
   <!-- PROPERTIES MODAL -->
   <div class="modal-overlay" id="propsOverlay">
     <div class="modal">
@@ -768,6 +798,22 @@ function toast(msg){
   clearTimeout(toast._h);
   toast._h = setTimeout(()=>t.classList.remove('show'), 2600);
 }
+function showConfirm(title, body, onConfirm){
+  document.getElementById('confirmTitle').textContent = title;
+  document.getElementById('confirmBody').textContent = body;
+  document.getElementById('confirmOverlay').classList.add('show');
+  const okBtn = document.getElementById('confirmOk');
+  const cancelBtn = document.getElementById('confirmCancel');
+  const cleanup = ()=>{
+    document.getElementById('confirmOverlay').classList.remove('show');
+    okBtn.removeEventListener('click', onOk);
+    cancelBtn.removeEventListener('click', onCancel);
+  };
+  function onOk(){ cleanup(); onConfirm(); }
+  function onCancel(){ cleanup(); }
+  okBtn.addEventListener('click', onOk);
+  cancelBtn.addEventListener('click', onCancel);
+}
 function fmtDate(ts){ return new Date(ts).toLocaleDateString(undefined,{month:'short',day:'numeric'}); }
 async function fileHashId(file){
   const raw = file.name + '_' + file.size + '_' + (file.lastModified||0);
@@ -821,20 +867,47 @@ function renderLibrary(){
       <div class="card-body">
         <div class="card-top">
           <span class="format-chip">${meta.ext}${meta.hasFile?'<span class="stored-chip">● stored</span>':''}</span>
-          <svg class="ring" viewBox="0 0 36 36">
-            <circle cx="18" cy="18" r="15.5" fill="none" stroke="#262B33" stroke-width="3"/>
-            <circle cx="18" cy="18" r="15.5" fill="none" stroke="${spineColorFor(meta.id)}" stroke-width="3"
-              stroke-dasharray="${2*Math.PI*15.5}" stroke-dashoffset="${2*Math.PI*15.5*(1-pct/100)}"
-              stroke-linecap="round" transform="rotate(-90 18 18)"/>
-            <text x="18" y="21" text-anchor="middle" font-size="10" fill="#EDEEF0" font-family="IBM Plex Mono">${pct}%</text>
-          </svg>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <svg class="ring" viewBox="0 0 36 36">
+              <circle cx="18" cy="18" r="15.5" fill="none" stroke="#262B33" stroke-width="3"/>
+              <circle cx="18" cy="18" r="15.5" fill="none" stroke="${spineColorFor(meta.id)}" stroke-width="3"
+                stroke-dasharray="${2*Math.PI*15.5}" stroke-dashoffset="${2*Math.PI*15.5*(1-pct/100)}"
+                stroke-linecap="round" transform="rotate(-90 18 18)"/>
+              <text x="18" y="21" text-anchor="middle" font-size="10" fill="#EDEEF0" font-family="IBM Plex Mono">${pct}%</text>
+            </svg>
+            <button class="card-delete" data-delete-id="${meta.id}" title="Remove from shelf">🗑</button>
+          </div>
         </div>
         <div class="card-title">${meta.title}</div>
         <div class="card-meta">Last opened ${fmtDate(meta.lastOpened)}</div>
       </div>`;
-    card.addEventListener('click', ()=> reopenBook(meta.id));
+    card.addEventListener('click', (e)=>{
+      if(e.target.closest('[data-delete-id]')) return;
+      reopenBook(meta.id);
+    });
     grid.appendChild(card);
   });
+}
+document.getElementById('grid').addEventListener('click', (e)=>{
+  const btn = e.target.closest('[data-delete-id]');
+  if(!btn) return;
+  e.stopPropagation();
+  deleteBook(btn.dataset.deleteId);
+});
+function deleteBook(id){
+  const meta = library[id];
+  if(!meta) return;
+  showConfirm(
+    'Remove this book?',
+    `"${meta.title}" will be removed from your shelf, along with its highlights, notes, and stored file. This can't be undone.`,
+    async ()=>{
+      try{ await idbDelete('meta', id); }catch(e){}
+      try{ await idbDelete('files', id); }catch(e){}
+      delete library[id];
+      renderLibrary();
+      toast('Removed from your shelf');
+    }
+  );
 }
 
 /* ============ OPEN FILE FLOW ============ */
@@ -937,7 +1010,8 @@ async function openBook(meta, file){
   document.getElementById('readerSettingsToggle').style.display = isText ? 'flex' : 'none';
   document.getElementById('listenToggle').style.display = isText ? 'flex' : 'none';
   document.getElementById('findToggle').style.display = (meta.format==='image') ? 'none' : 'flex';
-  document.getElementById('menuPrint').style.display = isPdf ? 'flex' : 'none';
+  document.getElementById('menuPrint').style.display = (isPdf||isText) ? 'flex' : 'none';
+  document.getElementById('menuConvertPdf').style.display = isText ? 'flex' : 'none';
   document.getElementById('menuProperties').style.display = isPdf ? 'flex' : 'none';
   document.getElementById('menuPdfSep').style.display = isPdf ? 'block' : 'none';
   document.getElementById('menuHandTool').style.display = isPdf ? 'flex' : 'none';
@@ -1249,10 +1323,79 @@ document.getElementById('menuDownload').addEventListener('click', ()=>{
   document.getElementById('moreMenu').classList.remove('show');
 });
 document.getElementById('menuPrint').addEventListener('click', ()=>{
-  if(!currentFileBlob){ toast('Nothing to print.'); return; }
   document.getElementById('moreMenu').classList.remove('show');
-  printCurrentFile();
+  if(currentDoc && currentDoc.type==='pdf'){
+    if(!currentFileBlob){ toast('Nothing to print.'); return; }
+    printCurrentFile();
+  } else if(currentDoc && currentDoc.type==='text'){
+    printCurrentText();
+  } else {
+    toast('Nothing to print.');
+  }
 });
+function printCurrentText(){
+  document.body.classList.add('printing-text');
+  window.print();
+  setTimeout(()=>document.body.classList.remove('printing-text'), 500);
+}
+window.addEventListener('afterprint', ()=>document.body.classList.remove('printing-text'));
+
+/* ---------- Convert Word/text to PDF ---------- */
+document.getElementById('menuConvertPdf').addEventListener('click', ()=>{
+  document.getElementById('moreMenu').classList.remove('show');
+  convertCurrentToPDF();
+});
+async function convertCurrentToPDF(){
+  if(typeof html2pdf === 'undefined'){
+    toast('PDF export library failed to load — check your internet connection and try again.');
+    return;
+  }
+  const inner = document.getElementById('textInner');
+  if(!inner || !inner.innerHTML.trim()){ toast('Nothing to convert.'); return; }
+
+  toast('Generating PDF… this can take a moment for longer books.');
+
+  // Build an isolated, print-safe copy rather than exporting the live dark-
+  // themed reading view — keeps headings/paragraphs/lists intact (mammoth
+  // already preserves real <h1>/<p>/<ul> structure from the .docx) while
+  // guaranteeing readable black-on-white output regardless of your reading
+  // theme, and keeps your highlights visible as soft color washes.
+  const clone = inner.cloneNode(true);
+  clone.querySelectorAll('mark').forEach(m=>{
+    const colorMap = { 'hl-mint':'rgba(51,201,150,.35)', 'hl-violet':'rgba(124,140,255,.35)', 'hl-amber':'rgba(240,165,30,.4)' };
+    const cls = ['hl-mint','hl-violet','hl-amber'].find(c=>m.classList.contains(c));
+    m.style.background = colorMap[cls] || 'rgba(255,220,100,.4)';
+    m.style.color = '#111';
+  });
+
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'background:#ffffff;color:#1a1a1a;padding:36px 44px;font-family:Georgia,\'Times New Roman\',serif;max-width:680px;margin:0 auto;line-height:1.7;font-size:12pt;';
+  const titleEl = document.createElement('h1');
+  titleEl.textContent = (current.title||'Book').replace(/\.(docx|txt|md)$/i,'');
+  titleEl.style.cssText = 'font-family:Georgia,serif;font-size:22pt;margin:0 0 22px;padding-bottom:14px;border-bottom:2px solid #ddd;color:#111;';
+  wrap.appendChild(titleEl);
+  wrap.appendChild(clone);
+  wrap.querySelectorAll('*').forEach(el=>{ el.style.color = el.style.color || '#1a1a1a'; });
+  wrap.style.position = 'fixed'; wrap.style.left = '-9999px'; wrap.style.top = '0';
+  document.body.appendChild(wrap);
+
+  try{
+    await html2pdf().from(wrap).set({
+      margin: 12,
+      filename: (current.title||'book').replace(/\.(docx|txt|md)$/i,'') + '.pdf',
+      image: { type:'jpeg', quality:0.95 },
+      html2canvas: { scale:2, useCORS:true, backgroundColor:'#ffffff' },
+      jsPDF: { unit:'mm', format:'a4', orientation:'portrait' },
+      pagebreak: { mode:['css','legacy'] }
+    }).save();
+    toast('PDF downloaded');
+  } catch(err){
+    console.error('convert to pdf failed', err);
+    toast('PDF conversion failed: ' + err.message);
+  } finally {
+    wrap.remove();
+  }
+}
 function printCurrentFile(){
   const url = URL.createObjectURL(currentFileBlob);
   let iframe = document.getElementById('printFrame');
