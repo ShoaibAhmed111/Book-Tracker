@@ -486,7 +486,7 @@
     <div class="topbar">
       <div class="brand"><div class="brand-mark"></div><div class="brand-name">Book Tracker</div></div>
       <div class="topbar-right">
-        <div class="version-badge mono" id="versionBadge">v1.1.0</div>
+        <div class="version-badge mono" id="versionBadge">v1.1.1</div>
         <button class="google-btn" id="googleBtn">
           <span>Sign in with Google</span>
           <div class="tooltip">Coming soon — enables cloud sync across devices</div>
@@ -840,6 +840,13 @@ function applyAppTheme(){
 async function toggleAppTheme(){
   settings.appTheme = settings.appTheme === 'light' ? 'dark' : 'light';
   applyAppTheme();
+  // The reading page follows the app-wide toggle too, unless the person
+  // has deliberately picked Sepia for the page itself (Aa panel) — that
+  // choice is intentional and shouldn't get silently overwritten.
+  if(settings.readerTheme !== 'sepia'){
+    settings.readerTheme = settings.appTheme;
+    applyReadingPrefs();
+  }
   await idbPut('settings', {key:'app', value:settings});
 }
 document.getElementById('themeToggle').addEventListener('click', toggleAppTheme);
