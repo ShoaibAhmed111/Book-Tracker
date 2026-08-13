@@ -12,6 +12,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
     --ink:#0B0D10; --panel:#14171C; --panel2:#1A1E25; --line:#262B33;
@@ -113,6 +115,12 @@
   .content-wrap{ flex:1; overflow-y:auto; display:flex; justify-content:center; }
   .content-inner{ width:100%; max-width:720px; padding:56px 28px 220px; font-size:17px; line-height:1.75; color:#DEE1E6; }
   .content-inner p{ margin:0 0 1.1em; }
+  .content-inner h1, .content-inner h2, .content-inner h3{ font-family:'Fraunces',serif; font-weight:600; margin:1.2em 0 .5em; line-height:1.3; }
+  .content-inner table{ border-collapse:collapse; width:100%; margin:0 0 1.5em; font-size:13px; }
+  .content-inner table.xlsx-table{ font-family:'IBM Plex Mono',monospace; font-size:12px; }
+  .content-inner td, .content-inner th{ border:1px solid var(--line); padding:6px 10px; text-align:left; white-space:nowrap; }
+  .content-inner th{ background:var(--panel2); font-weight:600; }
+  .content-inner tr:nth-child(even) td{ background:rgba(255,255,255,.02); }
   mark.hl-mint, mark.hl-violet, mark.hl-amber{
     color:inherit; border-radius:3px; padding:0 1px; cursor:pointer;
     -webkit-box-decoration-break:clone; box-decoration-break:clone;
@@ -124,20 +132,26 @@
   mark.hl-mint:hover, mark.hl-violet:hover, mark.hl-amber:hover{
     filter:brightness(1.25); box-shadow:0 0 0 1px rgba(255,255,255,.25);
   }
-  mark.pen-mint, mark.pen-violet, mark.pen-amber{
+  mark.ann-mint, mark.ann-violet, mark.ann-amber{
     background:transparent; color:inherit; cursor:pointer;
     -webkit-box-decoration-break:clone; box-decoration-break:clone;
-    padding-bottom:1px; transition:filter .12s;
+    padding-bottom:2px; border-bottom-style:dotted; border-bottom-width:2px; transition:filter .12s;
+    position:relative;
   }
-  mark.pen-mint{ box-shadow:inset 0 -3px 0 0 var(--signal); }
-  mark.pen-violet{ box-shadow:inset 0 -3px 0 0 var(--violet); }
-  mark.pen-amber{ box-shadow:inset 0 -3px 0 0 var(--amber); }
-  mark.pen-mint:hover, mark.pen-violet:hover, mark.pen-amber:hover{ filter:brightness(1.3); }
+  mark.ann-mint{ border-bottom-color:var(--signal); }
+  mark.ann-violet{ border-bottom-color:var(--violet); }
+  mark.ann-amber{ border-bottom-color:var(--amber); }
+  mark.ann-mint:hover, mark.ann-violet:hover, mark.ann-amber:hover{ filter:brightness(1.3); }
+  mark.ann-mint::after, mark.ann-violet::after, mark.ann-amber::after{
+    content:'💬'; font-size:9px; vertical-align:super; margin-left:1px; opacity:.85;
+  }
   .eraser-tool mark[data-hl-id]{ cursor:cell; }
   .eraser-tool mark[data-hl-id]:hover{ filter:brightness(.7) saturate(1.4); }
   .hl-remove-pop{ position:absolute; z-index:35; background:var(--panel2); border:1px solid var(--line);
-    border-radius:8px; padding:6px; display:none; }
+    border-radius:10px; padding:8px; display:none; max-width:260px; }
   .hl-remove-pop.show{ display:block; }
+  .hl-remove-pop-note{ font-size:12px; color:var(--paper); line-height:1.5; margin-bottom:8px;
+    padding-bottom:8px; border-bottom:1px solid var(--line); max-height:120px; overflow-y:auto; }
   .hl-remove-pop button{ background:var(--panel); border:1px solid var(--line); color:var(--danger);
     font-size:12px; padding:6px 10px; border-radius:6px; cursor:pointer; white-space:nowrap; }
   .hl-remove-pop button:hover{ background:rgba(255,106,106,.12); }
@@ -153,9 +167,11 @@
     transform-origin:0% 0%; user-select:text; -webkit-user-select:text; }
   .content-inner{ user-select:text; -webkit-user-select:text; }
   .textLayer ::selection{ background:rgba(51,230,176,.4); }
-  .textLayer mark, .textLayer mark.hl-mint, .textLayer mark.hl-violet, .textLayer mark.hl-amber, .textLayer mark.find-hit,
-  .textLayer mark.pen-mint, .textLayer mark.pen-violet, .textLayer mark.pen-amber{
+  .textLayer mark.hl-mint, .textLayer mark.hl-violet, .textLayer mark.hl-amber, .textLayer mark.find-hit{
     padding:0; border-radius:0; mix-blend-mode:multiply;
+  }
+  .textLayer mark.ann-mint, .textLayer mark.ann-violet, .textLayer mark.ann-amber{
+    border-radius:0; mix-blend-mode:multiply;
   }
   .textLayer mark.hl-mint{ background:rgba(51,230,176,.55); }
   .textLayer mark.hl-violet{ background:rgba(124,140,255,.55); }
@@ -305,6 +321,7 @@
   .rs-stepper span{ font-size:12px; color:var(--muted); }
 
   /* reading themes (applied to .content-wrap) */
+  .content-wrap{ background:#14171C; }
   .content-wrap.theme-light{ background:#F4F1EA; }
   .content-wrap.theme-light .content-inner{ color:#20242B; }
   .content-wrap.theme-sepia{ background:#EFE3C8; }
@@ -462,14 +479,14 @@
 <body>
 <div id="app">
 
-  <input type="file" id="fileInput" class="hidden-input" accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.gif,.webp">
+  <input type="file" id="fileInput" class="hidden-input" accept=".pdf,.docx,.txt,.md,.html,.htm,.odt,.pptx,.ppt,.xlsx,.xls,.png,.jpg,.jpeg,.gif,.webp">
 
   <!-- LIBRARY -->
   <div id="library" class="screen active">
     <div class="topbar">
       <div class="brand"><div class="brand-mark"></div><div class="brand-name">Book Tracker</div></div>
       <div class="topbar-right">
-        <div class="version-badge mono" id="versionBadge">v1.0.0</div>
+        <div class="version-badge mono" id="versionBadge">v1.1.0</div>
         <button class="google-btn" id="googleBtn">
           <span>Sign in with Google</span>
           <div class="tooltip">Coming soon — enables cloud sync across devices</div>
@@ -585,7 +602,10 @@
           </div>
         </div>
 
-        <div id="hlRemovePop" class="hl-remove-pop"><button id="hlRemoveBtn">Remove highlight</button></div>
+        <div id="hlRemovePop" class="hl-remove-pop">
+          <div id="hlRemovePopNote" class="hl-remove-pop-note" style="display:none;"></div>
+          <button id="hlRemoveBtn">Remove</button>
+        </div>
 
         <div class="reader-settings-pop" id="readerSettingsPop">
           <p class="rs-label">Theme</p>
@@ -651,7 +671,7 @@
         <div class="toolbar">
           <button class="tb-btn on" id="toolSelect" title="Select text normally">🖱 Select</button>
           <button class="tb-btn" id="toolHighlight" title="Highlight tool">🖊 Highlight</button>
-          <button class="tb-btn" id="toolPen" title="Underline tool">✏ Pen</button>
+          <button class="tb-btn" id="toolAnnotate" title="Annotate — mark text and attach a note in one step">🖍 Annotate</button>
           <button class="tb-btn" id="toolEraser" title="Eraser — click a mark to remove it">🧹 Eraser</button>
           <button class="tb-btn" id="toolNote" title="Add a note">＋ Note</button>
           <div class="toolbar-sep" id="toolSwatchSep" style="display:none;"></div>
@@ -865,9 +885,18 @@ function formatFor(ext){
   if(ext==='pdf') return 'pdf';
   if(ext==='docx') return 'docx';
   if(ext==='txt'||ext==='md') return 'text';
+  if(ext==='html'||ext==='htm') return 'html';
+  if(ext==='odt') return 'odt';
+  if(ext==='pptx'||ext==='ppt') return 'pptx';
+  if(ext==='xlsx'||ext==='xls') return 'xlsx';
   if(['png','jpg','jpeg','gif','webp'].includes(ext)) return 'image';
   return 'unknown';
 }
+// Every format in this set renders into the same #textInner container and
+// gets highlighting/notes/find/AI/TTS for free — only the content-loading
+// step differs per format. This is what makes "seamless across formats"
+// actually true rather than six separate viewers.
+const TEXTLIKE_FORMATS = ['text','docx','html','odt','pptx','xlsx'];
 const SPINE_COLORS = ['var(--signal)','var(--violet)','var(--amber)','#FF7A9C','#5AC8FA'];
 function spineColorFor(id){ let h=0; for(const c of id) h=(h*31+c.charCodeAt(0))>>>0; return SPINE_COLORS[h % SPINE_COLORS.length]; }
 function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
@@ -879,7 +908,7 @@ let current = null;
 let currentDoc = null;
 let currentFileBlob = null;
 let activeToolColor = 'mint'; // 'mint' | 'violet' | 'amber'
-let tool = 'select'; // 'select' | 'highlight' | 'pen' | 'eraser' | 'note'
+let tool = 'select'; // 'select' | 'highlight' | 'annotate' | 'eraser' | 'note'
 let pendingNoteAnchor = null;
 
 /* ============ LIBRARY ============ */
@@ -1045,7 +1074,7 @@ async function openBook(meta, file){
   updateProgressUI();
   renderDrawer();
 
-  const isPdf = meta.format==='pdf', isText = meta.format==='text'||meta.format==='docx';
+  const isPdf = meta.format==='pdf', isText = TEXTLIKE_FORMATS.includes(meta.format);
   document.getElementById('sidebarToggle').style.display = isPdf ? 'flex' : 'none';
   document.getElementById('readerSettingsToggle').style.display = isText ? 'flex' : 'none';
   document.getElementById('listenToggle').style.display = isText ? 'flex' : 'none';
@@ -1056,29 +1085,19 @@ async function openBook(meta, file){
   document.getElementById('menuPdfSep').style.display = isPdf ? 'block' : 'none';
   document.getElementById('menuHandTool').style.display = isPdf ? 'flex' : 'none';
 
-  if(meta.format==='text'){
-    const text = await file.text();
+  if(isText){
     document.getElementById('textView').style.display = 'flex';
     const inner = document.getElementById('textInner');
     inner.style.fontSize = '';
-    inner.innerHTML = text.split(/\n{2,}/).map(p=>`<p>${escapeHtml(p)}</p>`).join('');
-    reapplyTextHighlights(inner, meta.highlights);
-    attachTextTracking(inner.parentElement, inner);
-    attachSelectionHandlers(inner);
-    currentDoc = {type:'text'};
-    applyReadingPrefs();
-    requestAnimationFrame(()=>{
-      const el = inner.parentElement;
-      el.scrollTop = meta.scrollRatio * (el.scrollHeight - el.clientHeight);
-    });
-
-  } else if(meta.format==='docx'){
-    const arrayBuf = await file.arrayBuffer();
-    const result = await mammoth.convertToHtml({arrayBuffer:arrayBuf});
-    document.getElementById('textView').style.display = 'flex';
-    const inner = document.getElementById('textInner');
-    inner.style.fontSize = '';
-    inner.innerHTML = result.value;
+    inner.classList.toggle('table-content', meta.format==='xlsx');
+    showLoading('Opening ' + meta.title + '…');
+    try{
+      inner.innerHTML = await loadTextLikeContent(meta.format, file);
+    } catch(err){
+      console.error('failed to open', meta.format, err);
+      inner.innerHTML = `<p style="color:var(--danger)">Couldn't open this file: ${escapeHtml(err.message||String(err))}</p>`;
+    }
+    hideLoading();
     reapplyTextHighlights(inner, meta.highlights);
     attachTextTracking(inner.parentElement, inner);
     attachSelectionHandlers(inner);
@@ -1120,6 +1139,114 @@ async function openBook(meta, file){
   }
   saveMeta();
 }
+
+/* ============ TEXT-LIKE CONTENT LOADERS (one per format, shared rendering pipeline) ============ */
+async function loadTextLikeContent(format, file){
+  if(format==='text') return loadPlainText(file);
+  if(format==='docx') return loadDocx(file);
+  if(format==='html') return loadHtml(file);
+  if(format==='odt') return loadOdt(file);
+  if(format==='pptx') return loadPptx(file);
+  if(format==='xlsx') return loadXlsx(file);
+  throw new Error('Unsupported format');
+}
+
+async function loadPlainText(file){
+  const text = await file.text();
+  return text.split(/\n{2,}/).map(p=>`<p>${escapeHtml(p)}</p>`).join('');
+}
+
+async function loadDocx(file){
+  const arrayBuf = await file.arrayBuffer();
+  const result = await mammoth.convertToHtml({arrayBuffer:arrayBuf});
+  return result.value;
+}
+
+async function loadHtml(file){
+  const raw = await file.text();
+  // Strip scripts/styles/on* handlers — this is untrusted content being
+  // dropped straight into the app's own DOM, so it needs to be inert.
+  const doc = new DOMParser().parseFromString(raw, 'text/html');
+  doc.querySelectorAll('script, style, link[rel="stylesheet"], iframe, object, embed').forEach(el=>el.remove());
+  doc.querySelectorAll('*').forEach(el=>{
+    [...el.attributes].forEach(attr=>{
+      if(/^on/i.test(attr.name)) el.removeAttribute(attr.name);
+    });
+  });
+  return doc.body ? doc.body.innerHTML : raw;
+}
+
+async function loadOdt(file){
+  if(typeof JSZip === 'undefined') throw new Error('ODT support library failed to load — check your connection.');
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const contentXml = await zip.file('content.xml').async('text');
+  const doc = new DOMParser().parseFromString(contentXml, 'application/xml');
+  const NS = 'urn:oasis:names:tc:opendocument:xmlns:text:1.0';
+  const paras = doc.getElementsByTagNameNS(NS, 'p');
+  const headings = new Set([...doc.getElementsByTagNameNS(NS, 'h')]);
+  let html = '';
+  for(const node of paras.length ? paras : doc.getElementsByTagNameNS(NS,'h')){
+    const isHeading = headings.has(node) || node.localName==='h';
+    const text = escapeHtml(node.textContent || '').trim();
+    if(!text) continue;
+    html += isHeading ? `<h2>${text}</h2>` : `<p>${text}</p>`;
+  }
+  // also catch headings if the paragraph loop above only found <p>
+  if(!html){
+    for(const node of doc.getElementsByTagNameNS(NS,'h')){
+      const text = escapeHtml(node.textContent || '').trim();
+      if(text) html += `<h2>${text}</h2>`;
+    }
+  }
+  if(!html) throw new Error('No readable text found in this ODT file.');
+  return html + `<p style="color:var(--muted);font-size:12px;margin-top:32px;border-top:1px solid var(--line);padding-top:12px;">Converted from ODT — paragraph and heading text is preserved; complex layouts, tables, and images are not.</p>`;
+}
+
+async function loadPptx(file){
+  if(typeof JSZip === 'undefined') throw new Error('PPTX support library failed to load — check your connection.');
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const slideFiles = Object.keys(zip.files)
+    .filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+    .sort((a,b)=> parseInt(a.match(/\d+/)[0]) - parseInt(b.match(/\d+/)[0]));
+  if(!slideFiles.length) throw new Error('No slides found in this file.');
+  let html = '';
+  for(let i=0;i<slideFiles.length;i++){
+    const xml = await zip.file(slideFiles[i]).async('text');
+    const doc = new DOMParser().parseFromString(xml, 'application/xml');
+    const texts = [...doc.getElementsByTagName('a:t')].map(n=>n.textContent).filter(t=>t && t.trim());
+    html += `<h2 style="margin-top:${i?'40px':'0'};">Slide ${i+1}</h2>`;
+    html += texts.length
+      ? texts.map(t=>`<p>${escapeHtml(t)}</p>`).join('')
+      : `<p style="color:var(--muted);font-style:italic;">(no text on this slide)</p>`;
+  }
+  html += `<p style="color:var(--muted);font-size:12px;margin-top:32px;border-top:1px solid var(--line);padding-top:12px;">Showing slide text in reading order — not the visual slide design, images, or layout.</p>`;
+  return html;
+}
+
+async function loadXlsx(file){
+  if(typeof XLSX === 'undefined') throw new Error('XLSX support library failed to load — check your connection.');
+  const arrayBuf = await file.arrayBuffer();
+  const wb = XLSX.read(arrayBuf, {type:'array'});
+  let html = '';
+  wb.SheetNames.forEach((name, i)=>{
+    const sheet = wb.Sheets[name];
+    const rows = XLSX.utils.sheet_to_json(sheet, {header:1, raw:false, defval:''});
+    html += `<h2 style="margin-top:${i?'40px':'0'};">${escapeHtml(name)}</h2>`;
+    if(!rows.length){ html += `<p style="color:var(--muted);font-style:italic;">(empty sheet)</p>`; return; }
+    html += '<table class="xlsx-table"><tbody>';
+    rows.forEach((row, ri)=>{
+      html += '<tr>';
+      row.forEach(cell=>{
+        const tag = ri===0 ? 'th' : 'td';
+        html += `<${tag}>${escapeHtml(String(cell))}</${tag}>`;
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  });
+  return html;
+}
+
 
 /* ============ TEXT/DOCX SCROLL TRACKING ============ */
 function attachTextTracking(scrollEl, inner){
@@ -1655,7 +1782,7 @@ document.getElementById('backBtn').addEventListener('click', async ()=>{
 });
 document.getElementById('googleBtn').addEventListener('click', e=> e.preventDefault());
 
-/* ============ TOOLBAR (tool-based: select / highlight / pen / eraser / note) ============ */
+/* ============ TOOLBAR (tool-based: select / highlight / annotate / eraser / note) ============ */
 document.querySelectorAll('.tool-swatch').forEach(sw=>{
   sw.addEventListener('click', ()=>{
     document.querySelectorAll('.tool-swatch').forEach(s=>s.classList.remove('active'));
@@ -1663,13 +1790,13 @@ document.querySelectorAll('.tool-swatch').forEach(sw=>{
     activeToolColor = sw.dataset.hcolor;
   });
 });
-const TOOL_BUTTONS = { select:'toolSelect', highlight:'toolHighlight', pen:'toolPen', eraser:'toolEraser', note:'toolNote' };
+const TOOL_BUTTONS = { select:'toolSelect', highlight:'toolHighlight', annotate:'toolAnnotate', eraser:'toolEraser', note:'toolNote' };
 function setTool(next){
   tool = next;
   Object.entries(TOOL_BUTTONS).forEach(([key,id])=>{
     document.getElementById(id).classList.toggle('on', key===next);
   });
-  const showSwatches = (next==='highlight' || next==='pen');
+  const showSwatches = (next==='highlight' || next==='annotate');
   document.getElementById('toolSwatchSep').style.display = showSwatches ? 'block' : 'none';
   document.querySelectorAll('.tool-swatch').forEach(sw=> sw.style.display = showSwatches ? 'inline-block' : 'none');
   const stage = document.getElementById('pdfView');
@@ -1720,9 +1847,13 @@ function attachSelectionHandlers(container, pdfPage){
       const range = sel.getRangeAt(0);
       if(!container.contains(range.commonAncestorContainer)) return;
 
-      if(tool==='highlight' || tool==='pen'){
+      if(tool==='highlight'){
         applyDirectMark(range, container, pdfPage);
         window.getSelection().removeAllRanges();
+        return;
+      }
+      if(tool==='annotate'){
+        startAnnotation(range, container, pdfPage);
         return;
       }
       if(tool==='note'){
@@ -1742,7 +1873,7 @@ function attachSelectionHandlers(container, pdfPage){
   });
 }
 function applyDirectMark(range, container, pdfPage){
-  const className = (tool==='pen' ? 'pen-' : 'hl-') + activeToolColor;
+  const className = 'hl-' + activeToolColor;
   const start = textOffsetOf(container, range.startContainer, range.startOffset);
   const end = textOffsetOf(container, range.endContainer, range.endOffset);
   const text = range.toString();
@@ -1756,6 +1887,20 @@ function applyDirectMark(range, container, pdfPage){
     m.classList.add('hl-flash');
     m.addEventListener('animationend', ()=>m.classList.remove('hl-flash'), {once:true});
   });
+}
+function startAnnotation(range, container, pdfPage){
+  const className = 'ann-' + activeToolColor;
+  const start = textOffsetOf(container, range.startContainer, range.startOffset);
+  const end = textOffsetOf(container, range.endContainer, range.endOffset);
+  const text = range.toString();
+  const id = 'h'+Date.now();
+  wrapRangeWithMark(range, className, id);
+  window.getSelection().removeAllRanges();
+  const markEl = document.querySelector(`mark[data-hl-id="${id}"]`);
+  const rect = markEl ? markEl.getBoundingClientRect() : {left:0,top:0,bottom:0,width:0};
+  const hostRect = document.getElementById('viewerHost').getBoundingClientRect();
+  pendingNoteAnchor = { range:{start}, text, container, pdfPage, annotationMarkId:id, annotationColor:className, annotationEnd:end };
+  showNoteCompose(rect, hostRect);
 }
 function cloneRangeInfo(range, container){
   const start = textOffsetOf(container, range.startContainer, range.startOffset);
@@ -1856,11 +2001,21 @@ function showNoteCompose(rect, hostRect){
 }
 document.getElementById('noteCancel').addEventListener('click', ()=>{
   document.getElementById('noteCompose').classList.remove('show');
+  if(pendingNoteAnchor && pendingNoteAnchor.annotationMarkId){
+    unwrapMarkById(pendingNoteAnchor.annotationMarkId); // no note written — don't leave an orphan mark
+  }
   pendingNoteAnchor = null;
 });
 document.getElementById('noteSave').addEventListener('click', ()=>{
   const text = document.getElementById('noteText').value.trim();
-  if(!text || !pendingNoteAnchor) { document.getElementById('noteCompose').classList.remove('show'); return; }
+  if(!text){
+    if(pendingNoteAnchor && pendingNoteAnchor.annotationMarkId) unwrapMarkById(pendingNoteAnchor.annotationMarkId);
+    document.getElementById('noteCompose').classList.remove('show');
+    pendingNoteAnchor = null;
+    return;
+  }
+  if(!pendingNoteAnchor){ document.getElementById('noteCompose').classList.remove('show'); return; }
+
   const record = {
     id:'n'+Date.now(), text,
     quote: pendingNoteAnchor.text.slice(0,140),
@@ -1868,14 +2023,39 @@ document.getElementById('noteSave').addEventListener('click', ()=>{
     page: pendingNoteAnchor.pdfPage || null,
     created: Date.now()
   };
+
+  if(pendingNoteAnchor.annotationMarkId){
+    // Annotate tool: the mark was already placed in the DOM — now persist
+    // it as a highlight record (so it survives reload) and link the note
+    // to it so clicking the mark later shows this note.
+    record.highlightId = pendingNoteAnchor.annotationMarkId;
+    current.highlights = current.highlights||[];
+    current.highlights.push({
+      id: pendingNoteAnchor.annotationMarkId, color: pendingNoteAnchor.annotationColor,
+      start: pendingNoteAnchor.range.start, end: pendingNoteAnchor.annotationEnd,
+      text: pendingNoteAnchor.text.slice(0,140), page: pendingNoteAnchor.pdfPage||null
+    });
+    document.querySelectorAll(`mark[data-hl-id="${pendingNoteAnchor.annotationMarkId}"]`).forEach(m=>{
+      m.classList.add('hl-flash');
+      m.addEventListener('animationend', ()=>m.classList.remove('hl-flash'), {once:true});
+    });
+  }
+
   current.notes = current.notes||[];
   current.notes.push(record);
   saveMeta(); renderDrawer();
   document.getElementById('noteCompose').classList.remove('show');
   pendingNoteAnchor = null;
   window.getSelection().removeAllRanges();
-  toast('Note saved');
+  toast(record.highlightId ? 'Annotation saved' : 'Note saved');
 });
+function unwrapMarkById(id){
+  document.querySelectorAll(`mark[data-hl-id="${id}"]`).forEach(mark=>{
+    const parent = mark.parentNode;
+    parent.replaceChild(document.createTextNode(mark.textContent), mark);
+    parent.normalize();
+  });
+}
 
 /* ============ AI ACTIONS (explain / summarize / translate) ============ */
 let currentAIResult = null; // {text, action, sourceText, container, pdfPage}
@@ -2032,11 +2212,17 @@ document.addEventListener('click', (e)=>{
   const r = mark.getBoundingClientRect();
   pop.style.left = (r.left - hostRect.left) + 'px';
   pop.style.top = (r.bottom - hostRect.top + 6) + 'px';
+  const linkedNote = (current.notes||[]).find(n=>n.highlightId===activeHlId);
+  const noteBody = document.getElementById('hlRemovePopNote');
+  if(linkedNote){ noteBody.textContent = linkedNote.text; noteBody.style.display = 'block'; }
+  else { noteBody.style.display = 'none'; }
   pop.classList.add('show');
 });
 document.getElementById('hlRemoveBtn').addEventListener('click', ()=>{
   if(!activeHlId) return;
   removeHighlight(activeHlId);
+  current.notes = (current.notes||[]).filter(n=>n.highlightId!==activeHlId);
+  saveMeta(); renderDrawer();
   document.getElementById('hlRemovePop').classList.remove('show');
   activeHlId = null;
 });
@@ -2056,29 +2242,37 @@ function removeHighlight(id){
 /* ============ DRAWER ============ */
 function renderDrawer(){
   const list = document.getElementById('drawerList');
+  const annotationHlIds = new Set((current.notes||[]).filter(n=>n.highlightId).map(n=>n.highlightId));
   const items = [
-    ...(current.highlights||[]).map(h=>({...h,kind:'highlight'})),
+    ...(current.highlights||[]).filter(h=>!annotationHlIds.has(h.id)).map(h=>({...h,kind:'highlight'})),
     ...(current.notes||[]).map(n=>({...n,kind:'note'}))
   ].sort((a,b)=> (a.created||a.start||0) - (b.created||b.start||0));
   if(items.length===0){
-    list.innerHTML = '<div class="drawer-empty">Pick the Highlight or Pen tool below, then select text to mark it up.</div>';
+    list.innerHTML = '<div class="drawer-empty">Pick a tool below — Highlight, Annotate, or Note — then select text to mark it up.</div>';
     return;
   }
   list.innerHTML = items.map(it=>{
     if(it.kind==='highlight'){
-      const label = it.color && it.color.startsWith('pen-') ? 'Underline' : 'Highlight';
+      const label = it.color && it.color.startsWith('ann-') ? 'Annotation' : 'Highlight';
       return `<div class="note-item"><span class="tag">${label}${it.page?' · p.'+it.page:''}
         <span class="drawer-del" data-hl-del="${it.id}" style="float:right;color:var(--danger);cursor:pointer;">remove</span></span>
         <div class="quote">"${escapeHtml(it.text||'')}"</div></div>`;
     }
-    return `<div class="note-item"><span class="tag">Note${it.page?' · p.'+it.page:''}</span>
+    const label = it.highlightId ? 'Annotation' : 'Note';
+    return `<div class="note-item"><span class="tag">${label}${it.page?' · p.'+it.page:''}
+      ${it.highlightId?`<span class="drawer-del" data-hl-del="${it.highlightId}" data-note-del="${it.id}" style="float:right;color:var(--danger);cursor:pointer;">remove</span>`:''}</span>
       <div class="snippet">${escapeHtml(it.text)}</div>
       ${it.quote?`<div class="quote">"${escapeHtml(it.quote)}"</div>`:''}</div>`;
   }).join('');
 }
 document.getElementById('drawerList').addEventListener('click', (e)=>{
   const del = e.target.closest('[data-hl-del]');
-  if(del) removeHighlight(del.dataset.hlDel);
+  if(!del) return;
+  removeHighlight(del.dataset.hlDel);
+  if(del.dataset.noteDel){
+    current.notes = (current.notes||[]).filter(n=>n.id!==del.dataset.noteDel);
+    saveMeta(); renderDrawer();
+  }
 });
 
 /* ============ SETTINGS MODAL ============ */
