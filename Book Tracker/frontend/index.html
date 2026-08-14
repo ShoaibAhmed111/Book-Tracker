@@ -147,6 +147,24 @@
   }
   .eraser-tool mark[data-hl-id]{ cursor:cell; }
   .eraser-tool mark[data-hl-id]:hover{ filter:brightness(.7) saturate(1.4); }
+  .ann-mode-btn.on{ background:var(--panel2); box-shadow:inset 0 0 0 1px var(--signal); }
+
+  @keyframes bookmarkBob{ 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-2px); } }
+  .bookmark-marker{
+    display:inline-block; font-size:15px; cursor:pointer; margin:0 1px; line-height:1;
+    filter:drop-shadow(0 0 3px rgba(255,176,32,.65));
+    animation:bookmarkBob 2.2s ease-in-out infinite;
+  }
+  .bookmark-marker:hover{ filter:drop-shadow(0 0 6px rgba(255,176,32,.9)); }
+  .eraser-tool .bookmark-marker:hover{ filter:brightness(.7) saturate(1.4); }
+
+  .stamp-marker{
+    display:inline-block; font-size:14px; cursor:pointer; margin:0 1px; line-height:1;
+    transition:transform .12s;
+  }
+  .stamp-marker:hover{ transform:scale(1.25); }
+  .eraser-tool .stamp-marker:hover{ filter:brightness(.6); transform:scale(.9); }
+
   .hl-remove-pop{ position:absolute; z-index:35; background:var(--panel2); border:1px solid var(--line);
     border-radius:10px; padding:8px; display:none; max-width:260px; }
   .hl-remove-pop.show{ display:block; }
@@ -194,7 +212,7 @@
 
   .toolbar{ position:absolute; left:50%; bottom:26px; transform:translateX(-50%); display:flex; align-items:center;
     gap:6px; background:var(--panel); border:1px solid var(--line); padding:8px; border-radius:14px;
-    box-shadow:0 14px 40px rgba(0,0,0,.45); z-index:20; }
+    box-shadow:0 14px 40px rgba(0,0,0,.45); z-index:20; max-width:94vw; flex-wrap:wrap; justify-content:center; }
   .swatch{ width:26px; height:26px; border-radius:50%; cursor:pointer; border:2px solid transparent; }
   .swatch.active{ border-color:#fff; }
   .sw-mint{ background:var(--signal); } .sw-violet{ background:var(--violet); } .sw-amber{ background:var(--amber); }
@@ -243,6 +261,10 @@
   .note-item .snippet{ font-size:13px; color:#C7CBD3; line-height:1.5; }
   .note-item .quote{ font-size:12px; color:var(--muted); font-style:italic; border-left:2px solid var(--line); padding-left:8px; margin-top:6px; }
   .drawer-empty{ color:var(--muted); font-size:13px; padding:8px 0; text-align:center; margin-top:30px; }
+  .bookmark-banner{ display:flex; align-items:center; gap:8px; background:rgba(255,176,32,.1);
+    border:1px solid rgba(255,176,32,.35); border-radius:10px; padding:10px 12px; margin-bottom:14px;
+    font-size:12px; color:var(--paper); }
+  .bookmark-banner span{ line-height:1.4; }
 
   .toast{ position:absolute; top:20px; left:50%; transform:translateX(-50%) translateY(-10px); background:var(--panel2);
     border:1px solid var(--line); padding:10px 18px; border-radius:9px; font-size:13px; color:var(--paper);
@@ -486,7 +508,7 @@
     <div class="topbar">
       <div class="brand"><div class="brand-mark"></div><div class="brand-name">Book Tracker</div></div>
       <div class="topbar-right">
-        <div class="version-badge mono" id="versionBadge">v1.1.1</div>
+        <div class="version-badge mono" id="versionBadge">v1.2.0</div>
         <button class="google-btn" id="googleBtn">
           <span>Sign in with Google</span>
           <div class="tooltip">Coming soon — enables cloud sync across devices</div>
@@ -671,9 +693,16 @@
         <div class="toolbar">
           <button class="tb-btn on" id="toolSelect" title="Select text normally">🖱 Select</button>
           <button class="tb-btn" id="toolHighlight" title="Highlight tool">🖊 Highlight</button>
-          <button class="tb-btn" id="toolAnnotate" title="Annotate — mark text and attach a note in one step">🖍 Annotate</button>
+          <button class="tb-btn" id="toolAnnotate" title="Annotate — comment or stamp">🗨 Annotate</button>
+          <button class="tb-btn" id="toolBookmark" title="Bookmark — mark your reading spot">🔖 Bookmark</button>
           <button class="tb-btn" id="toolEraser" title="Eraser — click a mark to remove it">🧹 Eraser</button>
           <button class="tb-btn" id="toolNote" title="Add a note">＋ Note</button>
+          <div class="toolbar-sep" id="annotateSep" style="display:none;"></div>
+          <button class="tb-btn ann-mode-btn on" id="annModeComment" data-mode="comment" style="display:none;" title="Comment on a passage">💬</button>
+          <button class="tb-btn ann-mode-btn" id="annStampStar" data-mode="stamp" data-icon="⭐" style="display:none;" title="Stamp: star">⭐</button>
+          <button class="tb-btn ann-mode-btn" id="annStampCheck" data-mode="stamp" data-icon="✅" style="display:none;" title="Stamp: check">✅</button>
+          <button class="tb-btn ann-mode-btn" id="annStampX" data-mode="stamp" data-icon="❌" style="display:none;" title="Stamp: cross">❌</button>
+          <button class="tb-btn ann-mode-btn" id="annStampFlag" data-mode="stamp" data-icon="❗" style="display:none;" title="Stamp: important">❗</button>
           <div class="toolbar-sep" id="toolSwatchSep" style="display:none;"></div>
           <div class="swatch sw-mint active tool-swatch" data-hcolor="mint" style="display:none;" title="Mint"></div>
           <div class="swatch sw-violet tool-swatch" data-hcolor="violet" style="display:none;" title="Violet"></div>
@@ -915,7 +944,9 @@ let current = null;
 let currentDoc = null;
 let currentFileBlob = null;
 let activeToolColor = 'mint'; // 'mint' | 'violet' | 'amber'
-let tool = 'select'; // 'select' | 'highlight' | 'annotate' | 'eraser' | 'note'
+let tool = 'select'; // 'select' | 'highlight' | 'annotate' | 'bookmark' | 'eraser' | 'note'
+let annotateMode = 'comment'; // 'comment' | 'stamp'
+let stampIcon = '⭐';
 let pendingNoteAnchor = null;
 
 /* ============ LIBRARY ============ */
@@ -1013,7 +1044,7 @@ async function handleFile(file){
   let meta = library[id];
   if(!meta){
     meta = { id, title:file.name, ext, format, progress:0, lastOpened:Date.now(),
-      currentPage:1, totalPages:1, scrollRatio:0, highlights:[], notes:[], hasFile:true };
+      currentPage:1, totalPages:1, scrollRatio:0, highlights:[], notes:[], stamps:[], bookmark:null, hasFile:true };
   } else {
     meta.lastOpened = Date.now();
     meta.hasFile = true;
@@ -1106,13 +1137,21 @@ async function openBook(meta, file){
     }
     hideLoading();
     reapplyTextHighlights(inner, meta.highlights);
+    reapplyStamps(inner, null);
+    reapplyBookmark(inner, null);
     attachTextTracking(inner.parentElement, inner);
     attachSelectionHandlers(inner);
     currentDoc = {type:'text'};
     applyReadingPrefs();
     requestAnimationFrame(()=>{
       const el = inner.parentElement;
-      el.scrollTop = meta.scrollRatio * (el.scrollHeight - el.clientHeight);
+      const bmIcon = el.querySelector('.bookmark-marker');
+      if(bmIcon){
+        bmIcon.scrollIntoView({block:'center'});
+        toast('Resumed from your bookmark');
+      } else {
+        el.scrollTop = meta.scrollRatio * (el.scrollHeight - el.clientHeight);
+      }
     });
 
   } else if(meta.format==='pdf'){
@@ -1132,7 +1171,9 @@ async function openBook(meta, file){
     document.getElementById('invertToggle').classList.toggle('on', currentDoc.invert);
     document.getElementById('zoomPreset').value = String(currentDoc.scale);
     meta.totalPages = pdf.numPages;
-    await loadPdfContinuous(meta.currentPage||1);
+    const resumePage = (meta.bookmark && meta.bookmark.page) ? meta.bookmark.page : (meta.currentPage||1);
+    await loadPdfContinuous(resumePage);
+    if(meta.bookmark && meta.bookmark.page) toast('Resumed from your bookmark');
     loadDocProperties(pdf, meta, file);
 
   } else if(meta.format==='image'){
@@ -1263,8 +1304,13 @@ function attachTextTracking(scrollEl, inner){
     t = setTimeout(()=>{
       const max = scrollEl.scrollHeight - scrollEl.clientHeight;
       current.scrollRatio = max>0 ? scrollEl.scrollTop/max : 0;
-      current.progress = Math.min(100, Math.round(current.scrollRatio*100));
-      updateProgressUI();
+      // Once a bookmark exists, it's the deliberate source of truth for
+      // "how far read" — passive scrolling (including scrolling ahead to
+      // peek) no longer moves the displayed progress.
+      if(!current.bookmark){
+        current.progress = Math.min(100, Math.round(current.scrollRatio*100));
+        updateProgressUI();
+      }
       saveMeta();
     }, 250);
   };
@@ -1396,6 +1442,8 @@ async function renderPdfPageInto(wrap, num){
   });
 
   reapplyPdfHighlights(textLayerDiv, num);
+  reapplyStamps(textLayerDiv, num);
+  reapplyBookmark(textLayerDiv, num);
   attachSelectionHandlers(textLayerDiv, num);
 }
 
@@ -1415,8 +1463,10 @@ function updatePdfProgress(num){
   document.getElementById('prevPage').disabled = num<=1;
   document.getElementById('nextPage').disabled = num>=total;
   current.currentPage = num;
-  current.progress = total===1 ? 100 : Math.round(((num-1)/(total-1))*100);
-  updateProgressUI();
+  if(!current.bookmark){
+    current.progress = total===1 ? 100 : Math.round(((num-1)/(total-1))*100);
+    updateProgressUI();
+  }
   clearTimeout(updatePdfProgress._t);
   updatePdfProgress._t = setTimeout(saveMeta, 300);
 }
@@ -1797,13 +1847,16 @@ document.querySelectorAll('.tool-swatch').forEach(sw=>{
     activeToolColor = sw.dataset.hcolor;
   });
 });
-const TOOL_BUTTONS = { select:'toolSelect', highlight:'toolHighlight', annotate:'toolAnnotate', eraser:'toolEraser', note:'toolNote' };
+const TOOL_BUTTONS = { select:'toolSelect', highlight:'toolHighlight', annotate:'toolAnnotate', bookmark:'toolBookmark', eraser:'toolEraser', note:'toolNote' };
 function setTool(next){
   tool = next;
   Object.entries(TOOL_BUTTONS).forEach(([key,id])=>{
     document.getElementById(id).classList.toggle('on', key===next);
   });
-  const showSwatches = (next==='highlight' || next==='annotate');
+  const showAnnotateBar = (next==='annotate');
+  document.getElementById('annotateSep').style.display = showAnnotateBar ? 'block' : 'none';
+  document.querySelectorAll('.ann-mode-btn').forEach(b=> b.style.display = showAnnotateBar ? 'inline-flex' : 'none');
+  const showSwatches = (next==='highlight' || (next==='annotate' && annotateMode==='comment'));
   document.getElementById('toolSwatchSep').style.display = showSwatches ? 'block' : 'none';
   document.querySelectorAll('.tool-swatch').forEach(sw=> sw.style.display = showSwatches ? 'inline-block' : 'none');
   const stage = document.getElementById('pdfView');
@@ -1812,6 +1865,17 @@ function setTool(next){
 }
 Object.entries(TOOL_BUTTONS).forEach(([key,id])=>{
   document.getElementById(id).addEventListener('click', ()=> setTool(key));
+});
+document.querySelectorAll('.ann-mode-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.ann-mode-btn').forEach(b=>b.classList.remove('on'));
+    btn.classList.add('on');
+    annotateMode = btn.dataset.mode;
+    if(annotateMode==='stamp') stampIcon = btn.dataset.icon;
+    const showSwatches = (annotateMode==='comment');
+    document.getElementById('toolSwatchSep').style.display = showSwatches ? 'block' : 'none';
+    document.querySelectorAll('.tool-swatch').forEach(sw=> sw.style.display = showSwatches ? 'inline-block' : 'none');
+  });
 });
 document.getElementById('fontPlus').addEventListener('click', ()=> adjustFontOrZoom(1));
 document.getElementById('fontMinus').addEventListener('click', ()=> adjustFontOrZoom(-1));
@@ -1845,21 +1909,28 @@ document.getElementById('notesToggle').addEventListener('click', ()=>{
   document.getElementById('drawer').classList.toggle('open');
 });
 
-/* ============ SELECTION -> HIGHLIGHT / PEN / NOTE / AI (tool-driven) ============ */
+/* ============ SELECTION -> HIGHLIGHT / ANNOTATE / BOOKMARK / NOTE / AI (tool-driven) ============ */
 function attachSelectionHandlers(container, pdfPage){
   container.addEventListener('mouseup', ()=>{
     setTimeout(()=>{
       const sel = window.getSelection();
-      if(!sel || sel.isCollapsed || sel.rangeCount===0) return;
+      if(!sel || sel.rangeCount===0) return;
       const range = sel.getRangeAt(0);
       if(!container.contains(range.commonAncestorContainer)) return;
+
+      // Tools that act on a single click (no drag) rather than a selection.
+      if(sel.isCollapsed){
+        if(tool==='bookmark'){ placeBookmark(range, container, pdfPage); }
+        else if(tool==='annotate' && annotateMode==='stamp'){ placeStamp(range, container, pdfPage); }
+        return;
+      }
 
       if(tool==='highlight'){
         applyDirectMark(range, container, pdfPage);
         window.getSelection().removeAllRanges();
         return;
       }
-      if(tool==='annotate'){
+      if(tool==='annotate' && annotateMode==='comment'){
         startAnnotation(range, container, pdfPage);
         return;
       }
@@ -1870,7 +1941,7 @@ function attachSelectionHandlers(container, pdfPage){
         showNoteCompose(rect, hostRect);
         return;
       }
-      if(tool==='eraser') return; // eraser acts on click of an existing mark, not on selection
+      if(tool==='eraser' || tool==='bookmark') return; // these act on clicks of existing marks, not drag-selection
 
       // default 'select' tool: plain selection stays plain — just surface AI actions
       const rect = range.getBoundingClientRect();
@@ -1909,6 +1980,103 @@ function startAnnotation(range, container, pdfPage){
   pendingNoteAnchor = { range:{start}, text, container, pdfPage, annotationMarkId:id, annotationColor:className, annotationEnd:end };
   showNoteCompose(rect, hostRect);
 }
+
+/* ---------- Stamp placement (Zoom-style quick icon annotation) ---------- */
+function placeStamp(range, container, pdfPage){
+  const offset = textOffsetOf(container, range.startContainer, range.startOffset);
+  const icon = document.createElement('span');
+  icon.className = 'stamp-marker';
+  icon.textContent = stampIcon;
+  icon.dataset.stampId = 's'+Date.now();
+  icon.title = 'Click to remove';
+  try{ range.insertNode(icon); }catch(e){ return; }
+  current.stamps = current.stamps||[];
+  current.stamps.push({ id: icon.dataset.stampId, icon: stampIcon, start: offset, page: pdfPage||null, created: Date.now() });
+  saveMeta(); renderDrawer();
+  icon.classList.add('hl-flash');
+  icon.addEventListener('animationend', ()=>icon.classList.remove('hl-flash'), {once:true});
+}
+function reapplyStamps(container, pdfPageNum){
+  (current.stamps||[]).filter(s => (s.page||null) === (pdfPageNum||null)).forEach(s=>{
+    const r = buildRangeFromOffsets(container, s.start, s.start);
+    if(!r) return;
+    const icon = document.createElement('span');
+    icon.className = 'stamp-marker';
+    icon.textContent = s.icon;
+    icon.dataset.stampId = s.id;
+    icon.title = 'Click to remove';
+    try{ r.insertNode(icon); }catch(e){}
+  });
+}
+document.addEventListener('click', (e)=>{
+  const stamp = e.target.closest('.stamp-marker');
+  if(!stamp) return;
+  e.stopPropagation();
+  const id = stamp.dataset.stampId;
+  current.stamps = (current.stamps||[]).filter(s=>s.id!==id);
+  document.querySelectorAll(`.stamp-marker[data-stamp-id="${id}"]`).forEach(el=>el.remove());
+  saveMeta(); renderDrawer();
+});
+
+/* ---------- Bookmark placement (single resume-point marker) ---------- */
+function placeBookmark(range, container, pdfPage){
+  clearBookmarkDom();
+  const offset = textOffsetOf(container, range.startContainer, range.startOffset);
+  const icon = document.createElement('span');
+  icon.className = 'bookmark-marker';
+  icon.textContent = '🔖';
+  icon.title = 'Your bookmark — click to remove';
+  try{ range.insertNode(icon); }catch(e){ return; }
+  const snippetSource = range.startContainer.textContent || '';
+  current.bookmark = {
+    start: offset, page: pdfPage||null,
+    snippet: snippetSource.slice(Math.max(0, range.startOffset-30), range.startOffset+30).trim()
+  };
+  recomputeProgressFromBookmark();
+  saveMeta(); renderDrawer();
+  icon.classList.add('hl-flash');
+  icon.addEventListener('animationend', ()=>icon.classList.remove('hl-flash'), {once:true});
+  toast('Bookmark placed — this book will resume from here');
+}
+function clearBookmarkDom(){
+  document.querySelectorAll('.bookmark-marker').forEach(el=>el.remove());
+}
+function clearBookmark(){
+  clearBookmarkDom();
+  current.bookmark = null;
+  saveMeta(); renderDrawer();
+  toast('Bookmark removed');
+}
+function reapplyBookmark(container, pdfPageNum){
+  if(!current.bookmark) return;
+  if((current.bookmark.page||null) !== (pdfPageNum||null)) return;
+  const r = buildRangeFromOffsets(container, current.bookmark.start, current.bookmark.start);
+  if(!r) return;
+  const icon = document.createElement('span');
+  icon.className = 'bookmark-marker';
+  icon.textContent = '🔖';
+  icon.title = 'Your bookmark — click to remove';
+  try{ r.insertNode(icon); }catch(e){}
+}
+function recomputeProgressFromBookmark(){
+  if(!current.bookmark) return;
+  if(currentDoc && currentDoc.type==='text'){
+    const total = (document.getElementById('textInner').textContent||'').length || 1;
+    current.progress = Math.max(0, Math.min(100, Math.round((current.bookmark.start/total)*100)));
+  } else if(currentDoc && currentDoc.type==='pdf'){
+    const total = currentDoc.pdf.numPages;
+    current.progress = total<=1 ? 100 : Math.round(((current.bookmark.page-1)/(total-1))*100);
+  }
+  updateProgressUI();
+}
+document.addEventListener('click', (e)=>{
+  const bm = e.target.closest('.bookmark-marker');
+  if(!bm) return;
+  e.stopPropagation();
+  if(tool==='eraser'){ clearBookmark(); return; }
+  showConfirm('Remove your bookmark?', 'This clears the saved resume point for this book — your highlights and notes stay untouched.', clearBookmark);
+});
+
 function cloneRangeInfo(range, container){
   const start = textOffsetOf(container, range.startContainer, range.startOffset);
   const end = textOffsetOf(container, range.endContainer, range.endOffset);
@@ -2252,18 +2420,29 @@ function renderDrawer(){
   const annotationHlIds = new Set((current.notes||[]).filter(n=>n.highlightId).map(n=>n.highlightId));
   const items = [
     ...(current.highlights||[]).filter(h=>!annotationHlIds.has(h.id)).map(h=>({...h,kind:'highlight'})),
-    ...(current.notes||[]).map(n=>({...n,kind:'note'}))
+    ...(current.notes||[]).map(n=>({...n,kind:'note'})),
+    ...(current.stamps||[]).map(s=>({...s,kind:'stamp'}))
   ].sort((a,b)=> (a.created||a.start||0) - (b.created||b.start||0));
-  if(items.length===0){
-    list.innerHTML = '<div class="drawer-empty">Pick a tool below — Highlight, Annotate, or Note — then select text to mark it up.</div>';
+
+  const bookmarkHtml = current.bookmark
+    ? `<div class="bookmark-banner">🔖 <span>Bookmarked${current.bookmark.snippet?': "…'+escapeHtml(current.bookmark.snippet)+'…"':''}</span></div>`
+    : '';
+
+  if(items.length===0 && !current.bookmark){
+    list.innerHTML = '<div class="drawer-empty">Pick a tool below — Highlight, Annotate, Bookmark, or Note — then mark up the text.</div>';
     return;
   }
-  list.innerHTML = items.map(it=>{
+  const itemsHtml = items.map(it=>{
     if(it.kind==='highlight'){
       const label = it.color && it.color.startsWith('ann-') ? 'Annotation' : 'Highlight';
       return `<div class="note-item"><span class="tag">${label}${it.page?' · p.'+it.page:''}
         <span class="drawer-del" data-hl-del="${it.id}" style="float:right;color:var(--danger);cursor:pointer;">remove</span></span>
         <div class="quote">"${escapeHtml(it.text||'')}"</div></div>`;
+    }
+    if(it.kind==='stamp'){
+      return `<div class="note-item"><span class="tag">Stamp
+        <span class="drawer-del" data-stamp-del="${it.id}" style="float:right;color:var(--danger);cursor:pointer;">remove</span></span>
+        <div class="snippet" style="font-size:16px;">${it.icon}${it.page?' · p.'+it.page:''}</div></div>`;
     }
     const label = it.highlightId ? 'Annotation' : 'Note';
     return `<div class="note-item"><span class="tag">${label}${it.page?' · p.'+it.page:''}
@@ -2271,8 +2450,17 @@ function renderDrawer(){
       <div class="snippet">${escapeHtml(it.text)}</div>
       ${it.quote?`<div class="quote">"${escapeHtml(it.quote)}"</div>`:''}</div>`;
   }).join('');
+  list.innerHTML = bookmarkHtml + (itemsHtml || '<div class="drawer-empty">Nothing marked up yet.</div>');
 }
 document.getElementById('drawerList').addEventListener('click', (e)=>{
+  const stampDel = e.target.closest('[data-stamp-del]');
+  if(stampDel){
+    const id = stampDel.dataset.stampDel;
+    current.stamps = (current.stamps||[]).filter(s=>s.id!==id);
+    document.querySelectorAll(`.stamp-marker[data-stamp-id="${id}"]`).forEach(el=>el.remove());
+    saveMeta(); renderDrawer();
+    return;
+  }
   const del = e.target.closest('[data-hl-del]');
   if(!del) return;
   removeHighlight(del.dataset.hlDel);
