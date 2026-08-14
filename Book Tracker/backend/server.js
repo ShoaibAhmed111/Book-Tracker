@@ -109,6 +109,27 @@ app.post('/api/define', async (req, res) => {
   }
 });
 
+// ---------- AI: image prompt (for cover-art generation) ----------
+app.post('/api/image-prompt', async (req, res) => {
+  const { text, title } = req.body || {};
+  if (!text || typeof text !== 'string') return badRequest(res, 'Missing "text"');
+  const sample = text.slice(0, 4000);
+  try {
+    const prompt = await askGroq(
+      `You are writing a prompt for an AI image generator to create cover art for a document titled "${title||'Untitled'}". ` +
+      `Based on its themes and content below, write ONE vivid, evocative image-generation prompt (under 60 words). ` +
+      `Describe mood, subject, color palette, and art style (e.g. "digital painting", "minimalist poster", "cinematic illustration"). ` +
+      `Do NOT ask for any text, words, letters, or titles to appear in the image — image models render text badly. ` +
+      `Do NOT reference real, named public figures. Return ONLY the prompt text, nothing else.\n\nDocument excerpt:\n${sample}`,
+      150
+    );
+    res.json({ prompt: prompt.trim() });
+  } catch (err) {
+    console.error('image-prompt error', err);
+    res.status(502).json({ error: 'Prompt generation failed. Try again in a moment.' });
+  }
+});
+
 // ---------- Translate ----------
 app.post('/api/translate', async (req, res) => {
   const { text, target } = req.body || {};

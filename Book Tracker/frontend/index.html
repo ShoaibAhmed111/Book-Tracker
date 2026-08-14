@@ -165,6 +165,10 @@
   .stamp-marker:hover{ transform:scale(1.25); }
   .eraser-tool .stamp-marker:hover{ filter:brightness(.6); transform:scale(.9); }
 
+  .ink-canvas{ position:absolute; inset:0; pointer-events:none; z-index:3; touch-action:none; }
+  .draw-active .ink-canvas{ pointer-events:auto; cursor:crosshair; }
+  .eraser-tool .ink-canvas{ pointer-events:none; } /* erasing hit-tests via the page wrap, not the canvas */
+
   .hl-remove-pop{ position:absolute; z-index:35; background:var(--panel2); border:1px solid var(--line);
     border-radius:10px; padding:8px; display:none; max-width:260px; }
   .hl-remove-pop.show{ display:block; }
@@ -508,7 +512,7 @@
     <div class="topbar">
       <div class="brand"><div class="brand-mark"></div><div class="brand-name">Book Tracker</div></div>
       <div class="topbar-right">
-        <div class="version-badge mono" id="versionBadge">v1.2.0</div>
+        <div class="version-badge mono" id="versionBadge">v1.3.0</div>
         <button class="google-btn" id="googleBtn">
           <span>Sign in with Google</span>
           <div class="tooltip">Coming soon — enables cloud sync across devices</div>
@@ -703,6 +707,7 @@
           <button class="tb-btn ann-mode-btn" id="annStampCheck" data-mode="stamp" data-icon="✅" style="display:none;" title="Stamp: check">✅</button>
           <button class="tb-btn ann-mode-btn" id="annStampX" data-mode="stamp" data-icon="❌" style="display:none;" title="Stamp: cross">❌</button>
           <button class="tb-btn ann-mode-btn" id="annStampFlag" data-mode="stamp" data-icon="❗" style="display:none;" title="Stamp: important">❗</button>
+          <button class="tb-btn ann-mode-btn" id="annModeDraw" data-mode="draw" style="display:none;" title="Freehand ink (PDF pages only)">✏️ Draw</button>
           <div class="toolbar-sep" id="toolSwatchSep" style="display:none;"></div>
           <div class="swatch sw-mint active tool-swatch" data-hcolor="mint" style="display:none;" title="Mint"></div>
           <div class="swatch sw-violet tool-swatch" data-hcolor="violet" style="display:none;" title="Violet"></div>
@@ -945,6 +950,7 @@ let currentDoc = null;
 let currentFileBlob = null;
 let activeToolColor = 'mint'; // 'mint' | 'violet' | 'amber'
 let tool = 'select'; // 'select' | 'highlight' | 'annotate' | 'bookmark' | 'eraser' | 'note'
+let currentIsPdf = false;
 let annotateMode = 'comment'; // 'comment' | 'stamp'
 let stampIcon = '⭐';
 let pendingNoteAnchor = null;
@@ -1044,7 +1050,7 @@ async function handleFile(file){
   let meta = library[id];
   if(!meta){
     meta = { id, title:file.name, ext, format, progress:0, lastOpened:Date.now(),
-      currentPage:1, totalPages:1, scrollRatio:0, highlights:[], notes:[], stamps:[], bookmark:null, hasFile:true };
+      currentPage:1, totalPages:1, scrollRatio:0, highlights:[], notes:[], stamps:[], drawings:[], bookmark:null, hasFile:true };
   } else {
     meta.lastOpened = Date.now();
     meta.hasFile = true;
@@ -1122,6 +1128,12 @@ async function openBook(meta, file){
   document.getElementById('menuProperties').style.display = isPdf ? 'flex' : 'none';
   document.getElementById('menuPdfSep').style.display = isPdf ? 'block' : 'none';
   document.getElementById('menuHandTool').style.display = isPdf ? 'flex' : 'none';
+  currentIsPdf = isPdf;
+  if(!isPdf && annotateMode==='draw'){
+    annotateMode = 'comment';
+    document.querySelectorAll('.ann-mode-btn').forEach(b=>b.classList.remove('on'));
+    document.getElementById('annModeComment').classList.add('on');
+  }
 
   if(isText){
     document.getElementById('textView').style.display = 'flex';
@@ -1445,6 +1457,18 @@ async function renderPdfPageInto(wrap, num){
   reapplyStamps(textLayerDiv, num);
   reapplyBookmark(textLayerDiv, num);
   attachSelectionHandlers(textLayerDiv, num);
+
+  const inkCanvas = document.createElement('canvas');
+  inkCanvas.className = 'ink-canvas';
+  const inkScale = window.devicePixelRatio || 1;
+  inkCanvas.width = Math.floor(viewport.width * inkScale);
+  inkCanvas.height = Math.floor(viewport.height * inkScale);
+  inkCanvas.style.width = viewport.width+'px';
+  inkCanvas.style.height = viewport.height+'px';
+  inkCanvas.getContext('2d').scale(inkScale, inkScale);
+  wrap.appendChild(inkCanvas);
+  redrawInk(inkCanvas, num);
+  attachInkHandlers(inkCanvas, num);
 }
 
 function jumpPdfPage(delta){
@@ -1855,12 +1879,18 @@ function setTool(next){
   });
   const showAnnotateBar = (next==='annotate');
   document.getElementById('annotateSep').style.display = showAnnotateBar ? 'block' : 'none';
-  document.querySelectorAll('.ann-mode-btn').forEach(b=> b.style.display = showAnnotateBar ? 'inline-flex' : 'none');
-  const showSwatches = (next==='highlight' || (next==='annotate' && annotateMode==='comment'));
+  document.querySelectorAll('.ann-mode-btn').forEach(b=>{
+    const isDrawBtn = b.id==='annModeDraw';
+    b.style.display = (showAnnotateBar && (!isDrawBtn || currentIsPdf)) ? 'inline-flex' : 'none';
+  });
+  const showSwatches = (next==='highlight' || (next==='annotate' && (annotateMode==='comment'||annotateMode==='draw')));
   document.getElementById('toolSwatchSep').style.display = showSwatches ? 'block' : 'none';
   document.querySelectorAll('.tool-swatch').forEach(sw=> sw.style.display = showSwatches ? 'inline-block' : 'none');
   const stage = document.getElementById('pdfView');
-  if(stage) stage.classList.toggle('eraser-tool', next==='eraser');
+  if(stage){
+    stage.classList.toggle('eraser-tool', next==='eraser');
+    stage.classList.toggle('draw-active', next==='annotate' && annotateMode==='draw');
+  }
   document.getElementById('textView').classList.toggle('eraser-tool', next==='eraser');
 }
 Object.entries(TOOL_BUTTONS).forEach(([key,id])=>{
@@ -1872,9 +1902,11 @@ document.querySelectorAll('.ann-mode-btn').forEach(btn=>{
     btn.classList.add('on');
     annotateMode = btn.dataset.mode;
     if(annotateMode==='stamp') stampIcon = btn.dataset.icon;
-    const showSwatches = (annotateMode==='comment');
+    const showSwatches = (annotateMode==='comment' || annotateMode==='draw');
     document.getElementById('toolSwatchSep').style.display = showSwatches ? 'block' : 'none';
     document.querySelectorAll('.tool-swatch').forEach(sw=> sw.style.display = showSwatches ? 'inline-block' : 'none');
+    const stage = document.getElementById('pdfView');
+    if(stage) stage.classList.toggle('draw-active', annotateMode==='draw');
   });
 });
 document.getElementById('fontPlus').addEventListener('click', ()=> adjustFontOrZoom(1));
@@ -2016,6 +2048,107 @@ document.addEventListener('click', (e)=>{
   current.stamps = (current.stamps||[]).filter(s=>s.id!==id);
   document.querySelectorAll(`.stamp-marker[data-stamp-id="${id}"]`).forEach(el=>el.remove());
   saveMeta(); renderDrawer();
+});
+
+/* ---------- Freehand ink drawing (PDF pages only) ----------
+   Points are stored normalized (0–1 fraction of page width/height) rather
+   than pixels, so strokes stay correctly positioned across zoom changes —
+   the redraw step just multiplies by whatever the current viewport size is. */
+function strokeColorFor(name){
+  return name==='violet' ? '#7C8CFF' : name==='amber' ? '#FFB020' : '#33E6B0';
+}
+function chaikinSmooth(points, iterations){
+  let pts = points;
+  for(let it=0; it<iterations; it++){
+    if(pts.length<3) break;
+    const out = [pts[0]];
+    for(let i=0;i<pts.length-1;i++){
+      const p0=pts[i], p1=pts[i+1];
+      out.push({x:p0.x*0.75+p1.x*0.25, y:p0.y*0.75+p1.y*0.25});
+      out.push({x:p0.x*0.25+p1.x*0.75, y:p0.y*0.25+p1.y*0.75});
+    }
+    out.push(pts[pts.length-1]);
+    pts = out;
+  }
+  return pts;
+}
+function redrawInk(canvas, pageNum){
+  const ctx = canvas.getContext('2d');
+  const w = parseFloat(canvas.style.width), h = parseFloat(canvas.style.height);
+  ctx.clearRect(0,0,w,h);
+  (current.drawings||[]).filter(d=>d.page===pageNum).forEach(d=>{
+    ctx.strokeStyle = strokeColorFor(d.color);
+    ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    d.points.forEach((p,i)=>{
+      const x = p.x*w, y = p.y*h;
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+  });
+}
+function attachInkHandlers(canvas, pageNum){
+  let drawing = false, raw = [];
+  function posFrom(e){
+    const r = canvas.getBoundingClientRect();
+    return { x:(e.clientX-r.left)/r.width, y:(e.clientY-r.top)/r.height };
+  }
+  canvas.addEventListener('pointerdown', (e)=>{
+    if(!(tool==='annotate' && annotateMode==='draw')) return;
+    drawing = true; raw = [posFrom(e)];
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', (e)=>{
+    if(!drawing) return;
+    raw.push(posFrom(e));
+    const w = parseFloat(canvas.style.width), h = parseFloat(canvas.style.height);
+    const ctx = canvas.getContext('2d');
+    redrawInk(canvas, pageNum);
+    ctx.strokeStyle = strokeColorFor(activeToolColor);
+    ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    raw.forEach((p,i)=>{ const x=p.x*w, y=p.y*h; if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+    ctx.stroke();
+  });
+  canvas.addEventListener('pointerup', ()=>{
+    if(!drawing) return;
+    drawing = false;
+    if(raw.length>1){
+      const smoothed = chaikinSmooth(raw, 2);
+      current.drawings = current.drawings || [];
+      current.drawings.push({ id:'ink'+Date.now(), page:pageNum, color:activeToolColor, points:smoothed, created:Date.now() });
+      saveMeta(); renderDrawer();
+    }
+    raw = [];
+    redrawInk(canvas, pageNum);
+  });
+}
+// Eraser hit-testing for ink: the canvas itself stays pointer-events:none
+// outside Draw mode, so clicks pass through to the page wrap beneath —
+// this listener does its own proximity check against stored stroke points.
+document.addEventListener('click', (e)=>{
+  if(tool!=='eraser') return;
+  if(e.target.closest('mark[data-hl-id]') || e.target.closest('.stamp-marker') || e.target.closest('.bookmark-marker')) return;
+  const wrap = e.target.closest('.pdf-page-wrap');
+  if(!wrap) return;
+  const pageNum = parseInt(wrap.dataset.pageNum);
+  const r = wrap.getBoundingClientRect();
+  const px = (e.clientX-r.left)/r.width, py = (e.clientY-r.top)/r.height;
+  const TOL = 0.018;
+  let hitId=null, bestDist=Infinity;
+  (current.drawings||[]).filter(d=>d.page===pageNum).forEach(d=>{
+    d.points.forEach(p=>{
+      const dist = Math.hypot(p.x-px, p.y-py);
+      if(dist<bestDist){ bestDist=dist; hitId=d.id; }
+    });
+  });
+  if(hitId && bestDist<=TOL){
+    current.drawings = (current.drawings||[]).filter(d=>d.id!==hitId);
+    saveMeta(); renderDrawer();
+    const canvas = wrap.querySelector('.ink-canvas');
+    if(canvas) redrawInk(canvas, pageNum);
+    toast('Stroke removed');
+  }
 });
 
 /* ---------- Bookmark placement (single resume-point marker) ---------- */
@@ -2428,7 +2561,7 @@ function renderDrawer(){
     ? `<div class="bookmark-banner">🔖 <span>Bookmarked${current.bookmark.snippet?': "…'+escapeHtml(current.bookmark.snippet)+'…"':''}</span></div>`
     : '';
 
-  if(items.length===0 && !current.bookmark){
+  if(items.length===0 && !current.bookmark && (!current.drawings || current.drawings.length===0)){
     list.innerHTML = '<div class="drawer-empty">Pick a tool below — Highlight, Annotate, Bookmark, or Note — then mark up the text.</div>';
     return;
   }
@@ -2450,9 +2583,28 @@ function renderDrawer(){
       <div class="snippet">${escapeHtml(it.text)}</div>
       ${it.quote?`<div class="quote">"${escapeHtml(it.quote)}"</div>`:''}</div>`;
   }).join('');
-  list.innerHTML = bookmarkHtml + (itemsHtml || '<div class="drawer-empty">Nothing marked up yet.</div>');
+
+  const inkByPage = {};
+  (current.drawings||[]).forEach(d=>{ inkByPage[d.page] = (inkByPage[d.page]||0)+1; });
+  const inkHtml = Object.keys(inkByPage).map(page=>
+    `<div class="note-item"><span class="tag">✏️ Ink · p.${page}
+      <span class="drawer-del" data-ink-clear-page="${page}" style="float:right;color:var(--danger);cursor:pointer;">clear page</span></span>
+      <div class="snippet">${inkByPage[page]} stroke${inkByPage[page]>1?'s':''}</div></div>`
+  ).join('');
+
+  list.innerHTML = bookmarkHtml + (itemsHtml + inkHtml || '<div class="drawer-empty">Nothing marked up yet.</div>');
 }
 document.getElementById('drawerList').addEventListener('click', (e)=>{
+  const inkClear = e.target.closest('[data-ink-clear-page]');
+  if(inkClear){
+    const page = parseInt(inkClear.dataset.inkClearPage);
+    current.drawings = (current.drawings||[]).filter(d=>d.page!==page);
+    saveMeta(); renderDrawer();
+    const wrap = document.querySelector(`.pdf-page-wrap[data-page-num="${page}"]`);
+    const canvas = wrap && wrap.querySelector('.ink-canvas');
+    if(canvas) redrawInk(canvas, page);
+    return;
+  }
   const stampDel = e.target.closest('[data-stamp-del]');
   if(stampDel){
     const id = stampDel.dataset.stampDel;
