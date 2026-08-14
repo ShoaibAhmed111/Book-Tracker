@@ -512,7 +512,7 @@
     <div class="topbar">
       <div class="brand"><div class="brand-mark"></div><div class="brand-name">Book Tracker</div></div>
       <div class="topbar-right">
-        <div class="version-badge mono" id="versionBadge">v1.3.0</div>
+        <div class="version-badge mono" id="versionBadge">v1.4.0</div>
         <button class="google-btn" id="googleBtn">
           <span>Sign in with Google</span>
           <div class="tooltip">Coming soon — enables cloud sync across devices</div>
@@ -558,6 +558,7 @@
       <button id="menuDownload">⬇ Download original file</button>
       <button id="menuPrint" style="display:none;">🖨 Print</button>
       <button id="menuConvertPdf" style="display:none;">⇩ Convert to PDF</button>
+      <button id="menuCoverArt" style="display:none;">🎨 Generate cover image</button>
       <button id="menuProperties" style="display:none;">ℹ️ Document properties</button>
       <div class="sep" id="menuPdfSep" style="display:none;"></div>
       <button id="menuHandTool" style="display:none;">✋ Hand tool (pan)</button>
@@ -785,6 +786,26 @@
       <div id="propsBody"></div>
       <div class="modal-actions" style="justify-content:flex-end;">
         <button class="modal-close" id="propsClose">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- COVER ART MODAL -->
+  <div class="modal-overlay" id="coverArtOverlay">
+    <div class="modal" style="width:420px;">
+      <h2>Cover art</h2>
+      <p class="sub">Generated from this document's actual content — free, no account needed.</p>
+      <div id="coverArtBody">
+        <div class="ai-loading" style="margin:20px 0;">
+          <div class="ai-shimmer" style="height:200px;border-radius:10px;"></div>
+        </div>
+      </div>
+      <div class="modal-actions" style="justify-content:space-between;">
+        <button class="ghost-btn" id="coverArtRegen" style="padding:9px 16px;font-size:13px;">↻ Regenerate</button>
+        <div style="display:flex;gap:8px;">
+          <button class="ghost-btn" id="coverArtClose" style="padding:9px 16px;font-size:13px;">Close</button>
+          <button class="modal-close" id="coverArtDownload">Download</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1112,6 +1133,7 @@ async function openBook(meta, file){
   document.getElementById('drawer').classList.remove('open');
   document.getElementById('aiPanel').classList.remove('show');
   document.getElementById('selPopover').classList.remove('show');
+  document.getElementById('coverArtOverlay').classList.remove('show');
   setTool('select');
   stopTTS();
   screen('reader');
@@ -1125,6 +1147,7 @@ async function openBook(meta, file){
   document.getElementById('findToggle').style.display = (meta.format==='image') ? 'none' : 'flex';
   document.getElementById('menuPrint').style.display = (isPdf||isText) ? 'flex' : 'none';
   document.getElementById('menuConvertPdf').style.display = isText ? 'flex' : 'none';
+  document.getElementById('menuCoverArt').style.display = (isText||isPdf) ? 'flex' : 'none';
   document.getElementById('menuProperties').style.display = isPdf ? 'flex' : 'none';
   document.getElementById('menuPdfSep').style.display = isPdf ? 'block' : 'none';
   document.getElementById('menuHandTool').style.display = isPdf ? 'flex' : 'none';
@@ -1644,6 +1667,91 @@ async function convertCurrentToPDF(){
     wrap.remove();
   }
 }
+
+/* ---------- AI cover art (works for any text-based doc + PDF) ---------- */
+let coverArtBlob = null, coverArtSeed = 0;
+
+document.getElementById('menuCoverArt').addEventListener('click', ()=>{
+  document.getElementById('moreMenu').classList.remove('show');
+  document.getElementById('coverArtOverlay').classList.add('show');
+  generateCoverArt();
+});
+document.getElementById('coverArtClose').addEventListener('click', ()=>{
+  document.getElementById('coverArtOverlay').classList.remove('show');
+});
+document.getElementById('coverArtRegen').addEventListener('click', generateCoverArt);
+document.getElementById('coverArtDownload').addEventListener('click', ()=>{
+  if(!coverArtBlob){ toast('This image can\'t be downloaded directly — right-click it and choose "Save image as…"'); return; }
+  const url = URL.createObjectURL(coverArtBlob);
+  const a = document.createElement('a');
+  a.href = url; a.download = (current.title||'cover').replace(/\.[^.]+$/,'') + '-cover.png';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 3000);
+});
+
+async function extractDocumentSample(){
+  if(currentDoc && currentDoc.type==='text'){
+    return (document.getElementById('textInner').textContent || '').slice(0, 4000);
+  }
+  if(currentDoc && currentDoc.type==='pdf'){
+    let text = '';
+    const pagesToSample = Math.min(6, currentDoc.pdf.numPages);
+    for(let i=1;i<=pagesToSample && text.length<4000;i++){
+      const p = await currentDoc.pdf.getPage(i);
+      const tc = await p.getTextContent();
+      text += tc.items.map(it=>it.str).join(' ') + ' ';
+    }
+    return text.slice(0, 4000);
+  }
+  return '';
+}
+
+async function generateCoverArt(){
+  if(!settings.backendUrl){
+    document.getElementById('coverArtOverlay').classList.remove('show');
+    toast('Add your AI backend URL in Settings (⚙) first.');
+    return;
+  }
+  const body = document.getElementById('coverArtBody');
+  body.innerHTML = `<div class="ai-loading" style="margin:20px 0;"><div class="ai-shimmer" style="height:200px;border-radius:10px;"></div></div>
+    <p style="color:var(--muted);font-size:12px;text-align:center;margin-top:8px;">Reading the document, then generating art…</p>`;
+  coverArtBlob = null;
+
+  try{
+    const sample = await extractDocumentSample();
+    if(!sample.trim()) throw new Error('No readable text found in this document.');
+
+    const promptResp = await fetch(settings.backendUrl + '/api/image-prompt', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ text: sample, title: current.title })
+    });
+    const promptData = await promptResp.json();
+    if(!promptResp.ok) throw new Error(promptData.error || 'Prompt generation failed');
+
+    coverArtSeed = Math.floor(Math.random()*1e9);
+    const imgUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(promptData.prompt)}?width=1024&height=1024&nologo=true&seed=${coverArtSeed}`;
+
+    try{
+      const imgResp = await fetch(imgUrl);
+      if(!imgResp.ok) throw new Error('Image generation failed');
+      coverArtBlob = await imgResp.blob();
+      const objectUrl = URL.createObjectURL(coverArtBlob);
+      body.innerHTML = `<img src="${objectUrl}" style="width:100%;border-radius:10px;display:block;" alt="Generated cover art">
+        <p style="color:var(--muted);font-size:11px;margin-top:8px;font-style:italic;">"${escapeHtml(promptData.prompt)}"</p>`;
+    } catch(fetchErr){
+      // Some image hosts don't allow fetch() to read bytes cross-origin even
+      // though displaying via <img> is always fine — fall back gracefully.
+      coverArtBlob = null;
+      body.innerHTML = `<img src="${imgUrl}" style="width:100%;border-radius:10px;display:block;" alt="Generated cover art">
+        <p style="color:var(--muted);font-size:11px;margin-top:8px;font-style:italic;">"${escapeHtml(promptData.prompt)}"</p>
+        <p style="color:var(--amber);font-size:11px;margin-top:6px;">Right-click the image above and "Save image as…" — the Download button can't reach this one directly.</p>`;
+    }
+  } catch(err){
+    console.error('cover art failed', err);
+    body.innerHTML = `<p style="color:var(--danger);font-size:13px;">Couldn't generate cover art: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
 function printCurrentFile(){
   const url = URL.createObjectURL(currentFileBlob);
   let iframe = document.getElementById('printFrame');
