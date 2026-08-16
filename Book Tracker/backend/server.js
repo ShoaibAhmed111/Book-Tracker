@@ -169,6 +169,38 @@ app.post('/api/translate', async (req, res) => {
   }
 });
 
+// ---------- Auth: verify a Google Sign-In ID token ----------
+// Uses Google's tokeninfo endpoint for verification — simplest option with
+// zero new dependencies. Fine for personal/small-scale use; if this app
+// ever serves many users, swap to the google-auth-library package instead
+// (tokeninfo has lower rate limits and is meant for debugging more than
+// high-volume production verification).
+app.post('/api/auth/google', async (req, res) => {
+  const { idToken } = req.body || {};
+  if (!idToken) return badRequest(res, 'Missing "idToken"');
+  try {
+    const resp = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
+    const data = await resp.json();
+    if (!resp.ok || data.error) throw new Error(data.error_description || 'Invalid token');
+
+    // If GOOGLE_CLIENT_ID is set, enforce that the token was actually issued
+    // for THIS app (not some other Google-signed token) — real security.
+    // If unset, this check is skipped (fine for early local testing, but
+    // set it before this ever leaves your machine).
+    if (process.env.GOOGLE_CLIENT_ID && data.aud !== process.env.GOOGLE_CLIENT_ID) {
+      return res.status(401).json({ error: 'Token was not issued for this app.' });
+    }
+    if (data.email_verified !== 'true' && data.email_verified !== true) {
+      return res.status(401).json({ error: 'Google account email is not verified.' });
+    }
+
+    res.json({ email: data.email, name: data.name, picture: data.picture, sub: data.sub });
+  } catch (err) {
+    console.error('google auth verify failed', err);
+    res.status(401).json({ error: 'Could not verify Google sign-in.' });
+  }
+});
+
 app.get('/health', (req, res) => res.json({ ok: true }));
 
 const port = process.env.PORT || 8787;

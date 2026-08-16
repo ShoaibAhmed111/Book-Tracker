@@ -14,6 +14,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   :root{
     --ink:#0B0D10; --panel:#14171C; --panel2:#1A1E25; --line:#262B33;
@@ -59,6 +60,12 @@
   .tooltip{ position:absolute; top:calc(100% + 8px); right:0; background:var(--panel2);
     border:1px solid var(--line); padding:8px 12px; border-radius:8px; font-size:12px;
     color:var(--paper); white-space:nowrap; opacity:0; pointer-events:none; transition:.15s; transform:translateY(-4px); }
+  .user-chip{ display:flex; align-items:center; gap:8px; background:var(--panel2); border:1px solid var(--line);
+    padding:5px 10px 5px 5px; border-radius:20px; font-size:13px; color:var(--paper); }
+  .user-chip img{ width:24px; height:24px; border-radius:50%; display:block; }
+  .user-chip button{ background:transparent; border:none; color:var(--muted); cursor:pointer; font-size:11px;
+    width:18px; height:18px; border-radius:50%; }
+  .user-chip button:hover{ background:var(--panel); color:var(--danger); }
   .gear-btn{ width:36px; height:36px; border-radius:9px; border:1px solid var(--line);
     background:var(--panel2); color:var(--paper); display:flex; align-items:center; justify-content:center;
     cursor:pointer; font-size:16px; }
@@ -77,6 +84,12 @@
   .ghost-btn:hover{ border-color:#3A4150; }
 
   .shelf-label{ font-size:12px; text-transform:uppercase; letter-spacing:1.4px; color:var(--muted); margin:0 0 16px; }
+  .shelf-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:10px; }
+  .shelf-controls{ display:flex; gap:8px; }
+  .shelf-controls input{ background:var(--panel2); border:1px solid var(--line); color:var(--paper);
+    padding:8px 12px; border-radius:8px; font-size:13px; width:200px; }
+  .shelf-controls select{ background:var(--panel2); border:1px solid var(--line); color:var(--paper);
+    padding:8px 10px; border-radius:8px; font-size:13px; }
   .grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:18px; }
   .card{ background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); cursor:pointer;
     overflow:hidden; position:relative; transition:.15s border-color, .15s transform; display:flex; }
@@ -278,6 +291,16 @@
   .hidden-input{ display:none; }
   #dropHint{ position:absolute; inset:0; background:rgba(11,13,16,.85); display:none; align-items:center;
     justify-content:center; z-index:100; border:3px dashed var(--signal); }
+  #eraserCursor{
+    position:fixed; width:28px; height:28px; border-radius:50%;
+    border:2px solid var(--danger); background:rgba(255,106,106,.15);
+    pointer-events:none; z-index:9999; display:none; transform:translate(-50%,-50%);
+    box-shadow:0 0 0 1px rgba(0,0,0,.3);
+  }
+  #eraserCursor.active{ display:block; }
+  #eraserCursor.erasing{ background:rgba(255,106,106,.35); border-color:#fff; }
+  body.eraser-cursor-on, body.eraser-cursor-on *{ cursor:none !important; }
+  body.erasing-drag, body.erasing-drag *{ user-select:none !important; -webkit-user-select:none !important; }
   #dropHint.show{ display:flex; }
   #dropHint span{ font-family:'Fraunces',serif; font-size:22px; }
 
@@ -512,11 +535,17 @@
     <div class="topbar">
       <div class="brand"><div class="brand-mark"></div><div class="brand-name">Book Tracker</div></div>
       <div class="topbar-right">
-        <div class="version-badge mono" id="versionBadge">v1.4.0</div>
-        <button class="google-btn" id="googleBtn">
+        <div class="version-badge mono" id="versionBadge">v1.6.0</div>
+        <div id="googleSignInContainer"></div>
+        <button class="google-btn" id="googleBtnFallback" style="display:none;">
           <span>Sign in with Google</span>
-          <div class="tooltip">Coming soon — enables cloud sync across devices</div>
+          <div class="tooltip">Set your Google Client ID in Settings first — see the setup guide there</div>
         </button>
+        <div class="user-chip" id="userProfileChip" style="display:none;">
+          <img id="userAvatar" alt="">
+          <span id="userName"></span>
+          <button id="signOutBtn" title="Sign out">✕</button>
+        </div>
         <button class="gear-btn" id="themeToggle" title="Toggle light/dark mode">🌙</button>
         <button class="gear-btn" id="gearBtn" title="Settings">⚙</button>
       </div>
@@ -530,7 +559,17 @@
           <button class="ghost-btn" id="installBtn" style="display:none;"><span>⬇</span> Install app</button>
         </div>
       </div>
-      <div class="shelf-label">Your shelf</div>
+      <div class="shelf-row">
+        <div class="shelf-label" style="margin:0;">Your shelf</div>
+        <div class="shelf-controls">
+          <input type="text" id="librarySearch" placeholder="Search your shelf…">
+          <select id="librarySort">
+            <option value="recent">Recently opened</option>
+            <option value="title">Title A–Z</option>
+            <option value="progress">Progress</option>
+          </select>
+        </div>
+      </div>
       <div id="grid" class="grid"></div>
     </div>
   </div>
@@ -696,12 +735,12 @@
         </div>
 
         <div class="toolbar">
-          <button class="tb-btn on" id="toolSelect" title="Select text normally">🖱 Select</button>
-          <button class="tb-btn" id="toolHighlight" title="Highlight tool">🖊 Highlight</button>
-          <button class="tb-btn" id="toolAnnotate" title="Annotate — comment or stamp">🗨 Annotate</button>
-          <button class="tb-btn" id="toolBookmark" title="Bookmark — mark your reading spot">🔖 Bookmark</button>
-          <button class="tb-btn" id="toolEraser" title="Eraser — click a mark to remove it">🧹 Eraser</button>
-          <button class="tb-btn" id="toolNote" title="Add a note">＋ Note</button>
+          <button class="tb-btn on" id="toolSelect" title="Select text normally (V)">🖱 Select</button>
+          <button class="tb-btn" id="toolHighlight" title="Highlight tool (H)">🖊 Highlight</button>
+          <button class="tb-btn" id="toolAnnotate" title="Annotate — comment or stamp (A)">🗨 Annotate</button>
+          <button class="tb-btn" id="toolBookmark" title="Bookmark — mark your reading spot (B)">🔖 Bookmark</button>
+          <button class="tb-btn" id="toolEraser" title="Eraser — drag to erase (E)">🧹 Eraser</button>
+          <button class="tb-btn" id="toolNote" title="Add a note (N)">＋ Note</button>
           <div class="toolbar-sep" id="annotateSep" style="display:none;"></div>
           <button class="tb-btn ann-mode-btn on" id="annModeComment" data-mode="comment" style="display:none;" title="Comment on a passage">💬</button>
           <button class="tb-btn ann-mode-btn" id="annStampStar" data-mode="stamp" data-icon="⭐" style="display:none;" title="Stamp: star">⭐</button>
@@ -728,6 +767,7 @@
     </div>
   </div>
 
+  <div id="eraserCursor"></div>
   <div id="dropHint"><span>Drop your book to open it</span></div>
   <div class="toast" id="toast"></div>
 
@@ -755,6 +795,16 @@
           <option value="ar">Arabic</option>
           <option value="ru">Russian</option>
         </select>
+      </div>
+      <div class="field">
+        <label>Google Client ID (for Sign in with Google)</label>
+        <input type="text" id="googleClientIdInput" placeholder="xxxxx.apps.googleusercontent.com">
+        <div class="hint">One-time setup, ~5 minutes, needs your own Google account: go to
+          <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:var(--signal);">console.cloud.google.com/apis/credentials</a>
+          → Create Credentials → OAuth client ID → Web application → add
+          <code style="background:var(--panel);padding:1px 4px;border-radius:4px;">http://localhost:5500</code>
+          under Authorized JavaScript origins → copy the Client ID here.
+        </div>
       </div>
       <div class="field">
         <div class="storage-line" id="storageLine">Checking storage usage…</div>
@@ -875,13 +925,16 @@ async function idbDelete(store, key){
 }
 
 /* ============ SETTINGS ============ */
-let settings = { backendUrl:'', targetLang:'es', readerTheme:'dark', readerFont:'sans', readerLineHeight:1.75, appTheme:'dark' };
+let settings = { backendUrl:'', targetLang:'es', readerTheme:'dark', readerFont:'sans', readerLineHeight:1.75, readerFontSize:null, appTheme:'dark', googleClientId:'', user:null };
 async function loadSettings(){
   const s = await idbGet('settings','app');
   if(s) settings = {...settings, ...s.value};
   document.getElementById('backendUrlInput').value = settings.backendUrl || '';
   document.getElementById('targetLangInput').value = settings.targetLang || 'es';
+  document.getElementById('googleClientIdInput').value = settings.googleClientId || '';
   applyAppTheme();
+  applyUserProfileUI();
+  initGoogleSignIn();
 }
 function applyAppTheme(){
   const isLight = settings.appTheme === 'light';
@@ -909,7 +962,11 @@ document.getElementById('themeToggleReader').addEventListener('click', toggleApp
 async function saveSettings(){
   settings.backendUrl = document.getElementById('backendUrlInput').value.trim().replace(/\/$/,'');
   settings.targetLang = document.getElementById('targetLangInput').value;
+  const newClientId = document.getElementById('googleClientIdInput').value.trim();
+  const clientIdChanged = newClientId !== (settings.googleClientId||'');
+  settings.googleClientId = newClientId;
   await idbPut('settings', {key:'app', value:settings});
+  if(clientIdChanged) initGoogleSignIn();
 }
 
 /* ============ UTIL ============ */
@@ -983,11 +1040,24 @@ async function loadLibrary(){
   all.forEach(m=> library[m.id]=m);
   renderLibrary();
 }
+document.getElementById('librarySearch').addEventListener('input', renderLibrary);
+document.getElementById('librarySort').addEventListener('change', renderLibrary);
 function renderLibrary(){
   const grid = document.getElementById('grid');
-  const items = Object.values(library).sort((a,b)=>(b.lastOpened||0)-(a.lastOpened||0));
-  if(items.length===0){
+  const query = (document.getElementById('librarySearch').value||'').trim().toLowerCase();
+  const sortMode = document.getElementById('librarySort').value;
+  let items = Object.values(library);
+  if(query) items = items.filter(m => m.title.toLowerCase().includes(query));
+  if(sortMode==='title') items.sort((a,b)=> a.title.localeCompare(b.title));
+  else if(sortMode==='progress') items.sort((a,b)=> (b.progress||0)-(a.progress||0));
+  else items.sort((a,b)=>(b.lastOpened||0)-(a.lastOpened||0));
+
+  if(Object.keys(library).length===0){
     grid.innerHTML = '<div class="empty-state">Nothing here yet. Open a book to start your shelf — progress, highlights, and notes will show up here automatically.</div>';
+    return;
+  }
+  if(items.length===0){
+    grid.innerHTML = `<div class="empty-state">No books match "${escapeHtml(query)}".</div>`;
     return;
   }
   grid.innerHTML = '';
@@ -2000,6 +2070,11 @@ function setTool(next){
     stage.classList.toggle('draw-active', next==='annotate' && annotateMode==='draw');
   }
   document.getElementById('textView').classList.toggle('eraser-tool', next==='eraser');
+  if(next!=='eraser'){
+    document.getElementById('eraserCursor').classList.remove('active');
+    document.body.classList.remove('eraser-cursor-on','erasing-drag');
+    eraserDown = false;
+  }
 }
 Object.entries(TOOL_BUTTONS).forEach(([key,id])=>{
   document.getElementById(id).addEventListener('click', ()=> setTool(key));
@@ -2023,15 +2098,28 @@ function adjustFontOrZoom(dir){
   if(currentDoc && currentDoc.type==='pdf'){ changeZoom(dir*0.2); return; }
   const inner = document.getElementById('textInner');
   const cur = parseInt(getComputedStyle(inner).fontSize);
-  inner.style.fontSize = Math.max(13, Math.min(26, cur+dir*1.5))+'px';
+  const next = Math.max(13, Math.min(26, cur+dir*1.5));
+  inner.style.fontSize = next+'px';
+  settings.readerFontSize = next;
+  idbPut('settings', {key:'app', value:settings});
 }
 
 
-/* ============ ARROW-KEY / PAGE-KEY NAVIGATION ============ */
+/* ============ ARROW-KEY / PAGE-KEY NAVIGATION + TOOL SHORTCUTS ============ */
+const TOOL_SHORTCUTS = { v:'select', h:'highlight', a:'annotate', b:'bookmark', e:'eraser', n:'note' };
 document.addEventListener('keydown', (e)=>{
   if(!document.getElementById('reader').classList.contains('active')) return;
   const tag = (document.activeElement && document.activeElement.tagName) || '';
-  if(tag==='TEXTAREA' || tag==='INPUT') return;
+  if(tag==='TEXTAREA' || tag==='INPUT' || tag==='SELECT') return;
+  if(e.ctrlKey || e.metaKey || e.altKey) return; // don't hijack browser/OS shortcuts
+
+  const key = e.key.toLowerCase();
+  if(TOOL_SHORTCUTS[key]){
+    e.preventDefault();
+    setTool(TOOL_SHORTCUTS[key]);
+    return;
+  }
+
   const forward = ['ArrowDown','ArrowRight','PageDown',' '].includes(e.key);
   const backward = ['ArrowUp','ArrowLeft','PageUp'].includes(e.key);
   if(!forward && !backward) return;
@@ -2149,6 +2237,7 @@ function reapplyStamps(container, pdfPageNum){
   });
 }
 document.addEventListener('click', (e)=>{
+  if(tool==='eraser') return; // eraser tool erases via drag (see eraseAtPoint)
   const stamp = e.target.closest('.stamp-marker');
   if(!stamp) return;
   e.stopPropagation();
@@ -2231,33 +2320,88 @@ function attachInkHandlers(canvas, pageNum){
     redrawInk(canvas, pageNum);
   });
 }
-// Eraser hit-testing for ink: the canvas itself stays pointer-events:none
-// outside Draw mode, so clicks pass through to the page wrap beneath —
-// this listener does its own proximity check against stored stroke points.
-document.addEventListener('click', (e)=>{
-  if(tool!=='eraser') return;
-  if(e.target.closest('mark[data-hl-id]') || e.target.closest('.stamp-marker') || e.target.closest('.bookmark-marker')) return;
-  const wrap = e.target.closest('.pdf-page-wrap');
-  if(!wrap) return;
-  const pageNum = parseInt(wrap.dataset.pageNum);
-  const r = wrap.getBoundingClientRect();
-  const px = (e.clientX-r.left)/r.width, py = (e.clientY-r.top)/r.height;
-  const TOL = 0.018;
-  let hitId=null, bestDist=Infinity;
-  (current.drawings||[]).filter(d=>d.page===pageNum).forEach(d=>{
-    d.points.forEach(p=>{
-      const dist = Math.hypot(p.x-px, p.y-py);
-      if(dist<bestDist){ bestDist=dist; hitId=d.id; }
-    });
-  });
-  if(hitId && bestDist<=TOL){
-    current.drawings = (current.drawings||[]).filter(d=>d.id!==hitId);
+/* ---------- Unified drag-to-erase (Zoom-style: hold and drag over anything) ----------
+   Works across marks, stamps, the bookmark, and ink strokes in one continuous
+   motion — no need to click each thing separately. */
+let eraserDown = false;
+function eraseAtPoint(clientX, clientY){
+  const el = document.elementFromPoint(clientX, clientY);
+  if(!el) return false;
+
+  const mark = el.closest('mark[data-hl-id]');
+  if(mark){
+    const id = mark.dataset.hlId;
+    removeHighlight(id);
+    current.notes = (current.notes||[]).filter(n=>n.highlightId!==id);
     saveMeta(); renderDrawer();
-    const canvas = wrap.querySelector('.ink-canvas');
-    if(canvas) redrawInk(canvas, pageNum);
-    toast('Stroke removed');
+    return true;
   }
+  const stamp = el.closest('.stamp-marker');
+  if(stamp){
+    const id = stamp.dataset.stampId;
+    current.stamps = (current.stamps||[]).filter(s=>s.id!==id);
+    document.querySelectorAll(`.stamp-marker[data-stamp-id="${id}"]`).forEach(x=>x.remove());
+    saveMeta(); renderDrawer();
+    return true;
+  }
+  const bm = el.closest('.bookmark-marker');
+  if(bm){ clearBookmarkDom(); current.bookmark = null; saveMeta(); renderDrawer(); return true; }
+
+  const wrap = el.closest('.pdf-page-wrap');
+  if(wrap){
+    const pageNum = parseInt(wrap.dataset.pageNum);
+    const r = wrap.getBoundingClientRect();
+    const px = (clientX-r.left)/r.width, py = (clientY-r.top)/r.height;
+    const TOL = 0.02;
+    let hitId=null, bestDist=Infinity;
+    (current.drawings||[]).filter(d=>d.page===pageNum).forEach(d=>{
+      d.points.forEach(p=>{
+        const dist = Math.hypot(p.x-px, p.y-py);
+        if(dist<bestDist){ bestDist=dist; hitId=d.id; }
+      });
+    });
+    if(hitId && bestDist<=TOL){
+      current.drawings = (current.drawings||[]).filter(d=>d.id!==hitId);
+      saveMeta(); renderDrawer();
+      const canvas = wrap.querySelector('.ink-canvas');
+      if(canvas) redrawInk(canvas, pageNum);
+      return true;
+    }
+  }
+  return false;
+}
+document.addEventListener('pointerdown', (e)=>{
+  if(tool!=='eraser') return;
+  eraserDown = true;
+  document.body.classList.add('erasing-drag');
+  if(eraseAtPoint(e.clientX, e.clientY)) flashEraserCursor();
 });
+document.addEventListener('pointermove', (e)=>{
+  updateEraserCursor(e.clientX, e.clientY);
+  if(!eraserDown || tool!=='eraser') return;
+  if(eraseAtPoint(e.clientX, e.clientY)) flashEraserCursor();
+});
+document.addEventListener('pointerup', ()=>{ eraserDown = false; document.body.classList.remove('erasing-drag'); });
+document.addEventListener('pointercancel', ()=>{ eraserDown = false; document.body.classList.remove('erasing-drag'); });
+
+function updateEraserCursor(x, y){
+  const cur = document.getElementById('eraserCursor');
+  if(tool!=='eraser'){
+    cur.classList.remove('active');
+    document.body.classList.remove('eraser-cursor-on');
+    return;
+  }
+  cur.classList.add('active');
+  document.body.classList.add('eraser-cursor-on');
+  cur.style.left = x+'px';
+  cur.style.top = y+'px';
+}
+function flashEraserCursor(){
+  const cur = document.getElementById('eraserCursor');
+  cur.classList.add('erasing');
+  clearTimeout(flashEraserCursor._t);
+  flashEraserCursor._t = setTimeout(()=>cur.classList.remove('erasing'), 150);
+}
 
 /* ---------- Bookmark placement (single resume-point marker) ---------- */
 function placeBookmark(range, container, pdfPage){
@@ -2314,7 +2458,7 @@ document.addEventListener('click', (e)=>{
   const bm = e.target.closest('.bookmark-marker');
   if(!bm) return;
   e.stopPropagation();
-  if(tool==='eraser'){ clearBookmark(); return; }
+  if(tool==='eraser') return; // eraser tool erases via drag (see eraseAtPoint)
   showConfirm('Remove your bookmark?', 'This clears the saved resume point for this book — your highlights and notes stay untouched.', clearBookmark);
 });
 
@@ -2415,15 +2559,39 @@ function showNoteCompose(rect, hostRect){
   document.getElementById('noteText').value = '';
   document.getElementById('noteText').focus();
 }
+let editingNoteId = null;
+function openNoteForEdit(noteId){
+  const note = (current.notes||[]).find(n=>n.id===noteId);
+  if(!note) return;
+  editingNoteId = noteId;
+  pendingNoteAnchor = null;
+  const box = document.getElementById('noteCompose');
+  box.style.left = '50%'; box.style.top = '90px'; box.style.transform = 'translateX(-50%)';
+  document.getElementById('noteText').value = note.text;
+  box.classList.add('show');
+  document.getElementById('noteText').focus();
+}
 document.getElementById('noteCancel').addEventListener('click', ()=>{
   document.getElementById('noteCompose').classList.remove('show');
   if(pendingNoteAnchor && pendingNoteAnchor.annotationMarkId){
     unwrapMarkById(pendingNoteAnchor.annotationMarkId); // no note written — don't leave an orphan mark
   }
   pendingNoteAnchor = null;
+  editingNoteId = null;
 });
 document.getElementById('noteSave').addEventListener('click', ()=>{
   const text = document.getElementById('noteText').value.trim();
+
+  if(editingNoteId){
+    if(text){
+      const note = (current.notes||[]).find(n=>n.id===editingNoteId);
+      if(note){ note.text = text; saveMeta(); renderDrawer(); toast('Note updated'); }
+    }
+    document.getElementById('noteCompose').classList.remove('show');
+    editingNoteId = null;
+    return;
+  }
+
   if(!text){
     if(pendingNoteAnchor && pendingNoteAnchor.annotationMarkId) unwrapMarkById(pendingNoteAnchor.annotationMarkId);
     document.getElementById('noteCompose').classList.remove('show');
@@ -2492,6 +2660,8 @@ async function runAIAction(action, text, pdfPage){
   result.textContent = '';
   loading.classList.remove('hide');
   actions.style.display = 'none';
+  document.getElementById('aiSaveNote').style.display = '';
+  document.getElementById('aiCopy').textContent = 'Copy';
   panel.classList.add('show');
   currentAIResult = null;
 
@@ -2530,14 +2700,26 @@ async function runAIAction(action, text, pdfPage){
     };
   } catch(err){
     console.error(err);
-    panel.classList.remove('show');
-    toast('AI request failed: ' + err.message);
+    loading.classList.add('hide');
+    document.getElementById('aiPanelLabel').textContent = 'Couldn\'t complete that';
+    result.innerHTML = `<span style="color:var(--danger);">${escapeHtml(err.message)}</span>`;
+    result.classList.add('show');
+    actions.style.display = 'flex';
+    document.getElementById('aiSaveNote').style.display = 'none';
+    document.getElementById('aiCopy').textContent = '↻ Retry';
+    lastAIAction = { action, text, pdfPage };
   }
 }
+let lastAIAction = null;
 document.getElementById('aiPanelClose').addEventListener('click', ()=>{
   document.getElementById('aiPanel').classList.remove('show');
 });
 document.getElementById('aiCopy').addEventListener('click', async ()=>{
+  if(!currentAIResult && lastAIAction){
+    const { action, text, pdfPage } = lastAIAction;
+    runAIAction(action, text, pdfPage);
+    return;
+  }
   if(!currentAIResult) return;
   try{
     await navigator.clipboard.writeText(currentAIResult.text);
@@ -2617,12 +2799,9 @@ document.addEventListener('click', (e)=>{
     if(!e.target.closest('#hlRemovePop')) pop.classList.remove('show');
     return;
   }
+  if(tool==='eraser') return; // eraser tool erases via drag (see eraseAtPoint) — clicks are handled there
   const sel = window.getSelection();
   if(sel && !sel.isCollapsed) return; // this click was the end of a drag-selection, not a tap
-  if(tool==='eraser'){
-    removeHighlight(mark.dataset.hlId); // eraser tool: instant delete, no confirm
-    return;
-  }
   activeHlId = mark.dataset.hlId;
   const hostRect = document.getElementById('viewerHost').getBoundingClientRect();
   const r = mark.getBoundingClientRect();
@@ -2687,7 +2866,8 @@ function renderDrawer(){
     }
     const label = it.highlightId ? 'Annotation' : 'Note';
     return `<div class="note-item"><span class="tag">${label}${it.page?' · p.'+it.page:''}
-      ${it.highlightId?`<span class="drawer-del" data-hl-del="${it.highlightId}" data-note-del="${it.id}" style="float:right;color:var(--danger);cursor:pointer;">remove</span>`:''}</span>
+      <span class="drawer-edit" data-note-edit="${it.id}" style="float:right;color:var(--signal);cursor:pointer;margin-left:10px;">edit</span>
+      <span class="drawer-del" data-note-del="${it.id}" ${it.highlightId?`data-hl-del="${it.highlightId}"`:''} style="float:right;color:var(--danger);cursor:pointer;">remove</span></span>
       <div class="snippet">${escapeHtml(it.text)}</div>
       ${it.quote?`<div class="quote">"${escapeHtml(it.quote)}"</div>`:''}</div>`;
   }).join('');
@@ -2721,12 +2901,22 @@ document.getElementById('drawerList').addEventListener('click', (e)=>{
     saveMeta(); renderDrawer();
     return;
   }
-  const del = e.target.closest('[data-hl-del]');
-  if(!del) return;
-  removeHighlight(del.dataset.hlDel);
-  if(del.dataset.noteDel){
-    current.notes = (current.notes||[]).filter(n=>n.id!==del.dataset.noteDel);
+  const editBtn = e.target.closest('[data-note-edit]');
+  if(editBtn){
+    openNoteForEdit(editBtn.dataset.noteEdit);
+    return;
+  }
+  const noteDel = e.target.closest('[data-note-del]');
+  if(noteDel){
+    if(noteDel.dataset.hlDel) removeHighlight(noteDel.dataset.hlDel);
+    current.notes = (current.notes||[]).filter(n=>n.id!==noteDel.dataset.noteDel);
     saveMeta(); renderDrawer();
+    return;
+  }
+  const hlDel = e.target.closest('[data-hl-del]');
+  if(hlDel){
+    removeHighlight(hlDel.dataset.hlDel);
+    return;
   }
 });
 
@@ -2807,6 +2997,7 @@ function applyReadingPrefs(){
   if(settings.readerFont==='serif') inner.classList.add('font-serif');
   if(settings.readerFont==='mono') inner.classList.add('font-mono');
   inner.style.lineHeight = settings.readerLineHeight;
+  if(settings.readerFontSize) inner.style.fontSize = settings.readerFontSize+'px';
   document.getElementById('lineSpaceValue').textContent = settings.readerLineHeight.toFixed(2);
   document.querySelectorAll('[data-theme]').forEach(b=> b.classList.toggle('active', b.dataset.theme===settings.readerTheme));
   document.querySelectorAll('[data-font]').forEach(b=> b.classList.toggle('active', b.dataset.font===settings.readerFont));
@@ -2995,6 +3186,83 @@ function speakFrom(idx){
   };
   window.speechSynthesis.speak(u);
 }
+
+/* ============ GOOGLE SIGN-IN ============
+   Identity only for now — proves who you are, so a future cloud-sync
+   backend has someone to attach your data to. It does NOT yet sync your
+   library across devices; everything still lives in this browser's
+   IndexedDB. That's the next phase, once this is solid. */
+function initGoogleSignIn(){
+  const container = document.getElementById('googleSignInContainer');
+  const fallback = document.getElementById('googleBtnFallback');
+  if(settings.user){ container.style.display='none'; fallback.style.display='none'; return; }
+  if(!settings.googleClientId){
+    container.style.display = 'none';
+    fallback.style.display = 'flex';
+    return;
+  }
+  if(typeof google === 'undefined' || !google.accounts || !google.accounts.id){
+    // Google's script may not have loaded yet (slow network, blocked, etc).
+    // Retry briefly rather than failing silently.
+    setTimeout(initGoogleSignIn, 500);
+    return;
+  }
+  fallback.style.display = 'none';
+  container.style.display = 'block';
+  try{
+    google.accounts.id.initialize({
+      client_id: settings.googleClientId,
+      callback: handleGoogleCredential,
+      auto_select: false
+    });
+    container.innerHTML = '';
+    google.accounts.id.renderButton(container, { theme:'filled_black', size:'medium', shape:'pill', text:'signin' });
+  }catch(err){
+    console.error('Google Sign-In init failed', err);
+    container.style.display = 'none';
+    fallback.style.display = 'flex';
+  }
+}
+async function handleGoogleCredential(response){
+  if(!settings.backendUrl){
+    toast('Add your AI backend URL in Settings first — it also verifies sign-in.');
+    return;
+  }
+  try{
+    const resp = await fetch(settings.backendUrl + '/api/auth/google', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ idToken: response.credential })
+    });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Sign-in failed');
+    settings.user = { email:data.email, name:data.name, picture:data.picture };
+    await idbPut('settings', {key:'app', value:settings});
+    applyUserProfileUI();
+    initGoogleSignIn();
+    toast('Signed in as ' + data.name);
+  }catch(err){
+    console.error('sign-in verification failed', err);
+    toast('Sign-in failed: ' + err.message);
+  }
+}
+function applyUserProfileUI(){
+  const chip = document.getElementById('userProfileChip');
+  if(settings.user){
+    chip.style.display = 'flex';
+    document.getElementById('userAvatar').src = settings.user.picture || '';
+    document.getElementById('userName').textContent = settings.user.name || settings.user.email;
+  } else {
+    chip.style.display = 'none';
+  }
+}
+document.getElementById('signOutBtn').addEventListener('click', async ()=>{
+  settings.user = null;
+  await idbPut('settings', {key:'app', value:settings});
+  if(typeof google !== 'undefined' && google.accounts) google.accounts.id.disableAutoSelect();
+  applyUserProfileUI();
+  initGoogleSignIn();
+  toast('Signed out');
+});
 
 /* ============ BOOT ============ */
 (async function boot(){
