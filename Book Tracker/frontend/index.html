@@ -535,7 +535,7 @@
     <div class="topbar">
       <div class="brand"><div class="brand-mark"></div><div class="brand-name">Book Tracker</div></div>
       <div class="topbar-right">
-        <div class="version-badge mono" id="versionBadge">v1.6.0</div>
+        <div class="version-badge mono" id="versionBadge">v1.6.1</div>
         <div id="googleSignInContainer"></div>
         <button class="google-btn" id="googleBtnFallback" style="display:none;">
           <span>Sign in with Google</span>
@@ -2039,7 +2039,6 @@ document.getElementById('backBtn').addEventListener('click', async ()=>{
   await loadLibrary();
   screen('library');
 });
-document.getElementById('googleBtn').addEventListener('click', e=> e.preventDefault());
 
 /* ============ TOOLBAR (tool-based: select / highlight / annotate / eraser / note) ============ */
 document.querySelectorAll('.tool-swatch').forEach(sw=>{
