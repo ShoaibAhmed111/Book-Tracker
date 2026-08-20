@@ -14,7 +14,7 @@ const allowedOrigin = process.env.ALLOWED_ORIGIN || '*';
 app.use(cors({ origin: allowedOrigin }));
 
 const GROQ_KEY = process.env.GROQ_API_KEY;
-const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 
 async function askGroq(prompt, maxTokens) {
   const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
