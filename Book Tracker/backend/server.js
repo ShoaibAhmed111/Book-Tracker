@@ -201,7 +201,21 @@ app.post('/api/auth/google', async (req, res) => {
   }
 });
 
+app.get('/', (req, res) => {
+  res.json({
+    status: 'Book Tracker backend is running ✔',
+    note: 'This root page has no content itself — the app talks to the endpoints below automatically. Nothing to do here manually.',
+    health: '/health',
+    endpoints: ['/api/summarize', '/api/explain', '/api/define', '/api/translate', '/api/auth/google']
+  });
+});
 app.get('/health', (req, res) => res.json({ ok: true }));
 
 const port = process.env.PORT || 8787;
-app.listen(port, () => console.log(`Book Tracker backend listening on :${port}`));
+app.listen(port, () => {
+  console.log(`Book Tracker backend listening on :${port}`);
+  console.log(`Try http://localhost:${port}/health in a browser to confirm it's alive.`);
+  if (!GROQ_KEY) {
+    console.warn('⚠️  GROQ_API_KEY is missing from .env — AI features (Explain/Summarize/Define/Translate) will fail until you set it.');
+  }
+});

@@ -535,7 +535,7 @@
     <div class="topbar">
       <div class="brand"><div class="brand-mark"></div><div class="brand-name">Book Tracker</div></div>
       <div class="topbar-right">
-        <div class="version-badge mono" id="versionBadge">v1.6.1</div>
+        <div class="version-badge mono" id="versionBadge">v1.6.2</div>
         <div id="googleSignInContainer"></div>
         <button class="google-btn" id="googleBtnFallback" style="display:none;">
           <span>Sign in with Google</span>
@@ -2679,7 +2679,12 @@ async function runAIAction(action, text, pdfPage){
       url = settings.backendUrl + '/api/explain';
       body = { text };
     }
-    const resp = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    let resp;
+    try{
+      resp = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    }catch(networkErr){
+      throw new Error(`Can't reach ${settings.backendUrl} — is the backend running? (Check the terminal window where you ran "npm start".)`);
+    }
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Request failed');
     const resultText = data.summary || data.explanation || data.translated || data.definition || '(no result)';
