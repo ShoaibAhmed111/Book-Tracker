@@ -16,7 +16,7 @@ app.use(cors({ origin: allowedOrigin }));
 const GROQ_KEY = process.env.GROQ_API_KEY;
 const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 
-async function askGroq(prompt, maxTokens) {
+async function askGroq(prompt, maxTokens, _isRetry) {
   const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -32,7 +32,18 @@ async function askGroq(prompt, maxTokens) {
   const data = await resp.json();
   if (!resp.ok) throw new Error(data?.error?.message || 'Groq API error');
   const text = data?.choices?.[0]?.message?.content || '';
-  if (!text) throw new Error('Groq returned an empty response.');
+  const finishReason = data?.choices?.[0]?.finish_reason;
+  if (!text) {
+    // Reasoning-capable models can spend the whole token budget "thinking"
+    // before writing anything, leaving content empty with finish_reason
+    // "length". One automatic retry with more headroom fixes this without
+    // bothering the person using the app.
+    if (!_isRetry && finishReason === 'length') {
+      console.warn(`askGroq: empty response (truncated by length), retrying once with ${maxTokens * 2} tokens`);
+      return askGroq(prompt, maxTokens * 2, true);
+    }
+    throw new Error('Groq returned an empty response.');
+  }
   return text;
 }
 
@@ -66,7 +77,7 @@ app.post('/api/summarize', async (req, res) => {
   try {
     const summary = await askGroq(
       `Summarize the following passage in 3-5 concise sentences. Do not add commentary before or after the summary.\n\n${text}`,
-      400
+      900
     );
     res.json({ summary });
   } catch (err) {
@@ -84,7 +95,7 @@ app.post('/api/explain', async (req, res) => {
     const prompt = context
       ? `Explain the following passage clearly, in plain language, as if to someone unfamiliar with the topic. Use this surrounding context if it helps: "${context.slice(0, 1000)}"\n\nPassage to explain:\n${text}`
       : `Explain the following passage clearly, in plain language, as if to someone unfamiliar with the topic:\n\n${text}`;
-    const explanation = await askGroq(prompt, 500);
+    const explanation = await askGroq(prompt, 1000);
     res.json({ explanation });
   } catch (err) {
     console.error('explain error', err);
@@ -101,7 +112,7 @@ app.post('/api/define', async (req, res) => {
     const prompt = context
       ? `Give a short dictionary-style definition of "${word}" as used in this context: "${context.slice(0, 400)}". Format: part of speech, then a one-sentence definition, then a short example sentence. No preamble.`
       : `Give a short dictionary-style definition of "${word}". Format: part of speech, then a one-sentence definition, then a short example sentence. No preamble.`;
-    const definition = await askGroq(prompt, 200);
+    const definition = await askGroq(prompt, 600);
     res.json({ definition });
   } catch (err) {
     console.error('define error', err);
@@ -121,7 +132,7 @@ app.post('/api/image-prompt', async (req, res) => {
       `Describe mood, subject, color palette, and art style (e.g. "digital painting", "minimalist poster", "cinematic illustration"). ` +
       `Do NOT ask for any text, words, letters, or titles to appear in the image — image models render text badly. ` +
       `Do NOT reference real, named public figures. Return ONLY the prompt text, nothing else.\n\nDocument excerpt:\n${sample}`,
-      150
+      600
     );
     res.json({ prompt: prompt.trim() });
   } catch (err) {
@@ -144,7 +155,7 @@ app.post('/api/translate', async (req, res) => {
     try {
       const translated = await askGroq(
         `Translate the following text into language code "${target}". Return ONLY the translated text, nothing else.\n\n${text}`,
-        1000
+        1600
       );
       return res.json({ translated });
     } catch (err) {
