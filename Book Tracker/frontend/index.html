@@ -12,6 +12,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -523,6 +524,56 @@
     }
     body.printing-text mark{ -webkit-print-color-adjust:exact; print-color-adjust:exact; color:#111 !important; }
   }
+  /* ================= WHITEBOARD ================= */
+  .wb-overlay{ position:fixed; inset:0; background:var(--ink); z-index:200; display:none; flex-direction:column; }
+  .wb-overlay.show{ display:flex; }
+  .wb-topbar{ display:flex; align-items:center; justify-content:space-between; padding:12px 18px;
+    border-bottom:1px solid var(--line); flex-shrink:0; background:var(--panel); }
+  .wb-title{ font-family:'Fraunces',serif; font-size:15px; font-weight:600; }
+  .wb-topbar-right{ display:flex; align-items:center; gap:6px; }
+  .wb-topbar-right button{ background:var(--panel2); border:1px solid var(--line); color:var(--paper);
+    font-size:13px; padding:7px 11px; border-radius:8px; cursor:pointer; white-space:nowrap; }
+  .wb-topbar-right button:hover{ border-color:#3A4150; }
+  .wb-topbar-right button:disabled{ opacity:.35; cursor:not-allowed; }
+  .wb-sep-v{ width:1px; height:20px; background:var(--line); margin:0 4px; }
+  .wb-zoom-indicator{ font-size:12px; color:var(--muted); font-family:'IBM Plex Mono',monospace; min-width:42px; text-align:center; }
+
+  .wb-viewport{ flex:1; position:relative; overflow:hidden; background:
+    radial-gradient(circle, var(--line) 1px, transparent 1px) 0 0 / 26px 26px, var(--ink); cursor:crosshair; }
+  .wb-world{ position:absolute; left:0; top:0; transform-origin:0 0; will-change:transform; }
+  #wbCanvas{ position:absolute; inset:0; pointer-events:none; }
+
+  .wb-toolbar{ position:absolute; left:50%; bottom:22px; transform:translateX(-50%); display:flex;
+    align-items:center; gap:5px; background:var(--panel); border:1px solid var(--line); padding:7px;
+    border-radius:14px; box-shadow:0 14px 40px rgba(0,0,0,.45); z-index:10; flex-wrap:wrap; max-width:92vw;
+    justify-content:center; }
+  .wb-tool{ background:transparent; border:none; color:var(--paper); font-size:16px; width:34px; height:34px;
+    border-radius:9px; cursor:pointer; display:flex; align-items:center; justify-content:center;
+    transition:.12s transform, .12s background; }
+  .wb-tool:hover{ background:var(--panel2); }
+  .wb-tool.on{ background:var(--panel2); box-shadow:inset 0 0 0 1px var(--signal); }
+  .wb-tool:active{ transform:scale(.92); }
+  .wb-sep{ width:1px; height:22px; background:var(--line); margin:0 4px; }
+  .wb-swatch{ width:22px; height:22px; border-radius:50%; cursor:pointer; border:2px solid transparent;
+    flex-shrink:0; }
+  .wb-swatch.active{ border-color:#fff; transform:scale(1.1); }
+  #wbColorCustom{ width:26px; height:26px; border:none; border-radius:6px; background:none; cursor:pointer;
+    padding:0; }
+  #wbStrokeWidth{ width:70px; accent-color:var(--signal); }
+
+  /* Elements rendered inside the transformed world (sticky/text/shapes) */
+  .wb-el{ position:absolute; cursor:move; user-select:none; }
+  .wb-el.selected{ outline:2px solid var(--signal); outline-offset:2px; }
+  .wb-sticky{ min-width:120px; min-height:100px; border-radius:6px; padding:12px; box-shadow:0 6px 18px rgba(0,0,0,.35);
+    font-family:'Inter',sans-serif; font-size:14px; line-height:1.4; color:#1a1a1a; }
+  .wb-sticky[contenteditable]:focus{ outline:2px solid rgba(0,0,0,.2); }
+  .wb-text{ font-family:'Inter',sans-serif; font-size:20px; line-height:1.3; padding:4px; min-width:40px;
+    cursor:text; }
+  .wb-text[contenteditable]:focus{ outline:2px dashed var(--signal); }
+  .wb-shape{ background:transparent; }
+  .wb-resize-handle{ position:absolute; width:12px; height:12px; background:var(--signal); border-radius:50%;
+    right:-6px; bottom:-6px; cursor:nwse-resize; border:2px solid var(--ink); display:none; }
+  .wb-el.selected .wb-resize-handle{ display:block; }
 </style>
 </head>
 <body>
@@ -535,7 +586,7 @@
     <div class="topbar">
       <div class="brand"><div class="brand-mark"></div><div class="brand-name">Book Tracker</div></div>
       <div class="topbar-right">
-        <div class="version-badge mono" id="versionBadge">v1.6.2</div>
+        <div class="version-badge mono" id="versionBadge">v1.7.0</div>
         <div id="googleSignInContainer"></div>
         <button class="google-btn" id="googleBtnFallback" style="display:none;">
           <span>Sign in with Google</span>
@@ -589,6 +640,7 @@
         <button class="icon-btn" id="listenToggle" title="Listen" style="display:none;">🔊</button>
         <button class="icon-btn" id="readerSettingsToggle" title="Reading settings" style="display:none;">Aa</button>
         <button class="icon-btn" id="notesToggle" title="Notes & highlights">🗒</button>
+        <button class="icon-btn" id="whiteboardToggle" title="Whiteboard">🖍</button>
         <button class="icon-btn" id="themeToggleReader" title="Toggle light/dark mode">🌙</button>
         <button class="icon-btn" id="moreToggle" title="More">⋯</button>
       </div>
@@ -813,6 +865,50 @@
         <button class="ghost-btn" id="checkUpdateBtn" style="padding:8px 14px; font-size:12px;">Check for updates</button>
         <button class="modal-close" id="settingsClose">Done</button>
       </div>
+    </div>
+  </div>
+
+  <!-- WHITEBOARD -->
+  <div class="wb-overlay" id="wbOverlay">
+    <div class="wb-topbar">
+      <span class="wb-title">🖍 Whiteboard <span id="wbBookTitle" style="color:var(--muted);font-weight:400;"></span></span>
+      <div class="wb-topbar-right">
+        <button id="wbUndo" title="Undo (Ctrl+Z)">↺</button>
+        <button id="wbRedo" title="Redo (Ctrl+Shift+Z)">↻</button>
+        <span class="wb-sep-v"></span>
+        <button id="wbZoomOut" title="Zoom out">−</button>
+        <span class="wb-zoom-indicator" id="wbZoomIndicator">100%</span>
+        <button id="wbZoomIn" title="Zoom in">+</button>
+        <button id="wbZoomReset" title="Reset view">⤢</button>
+        <span class="wb-sep-v"></span>
+        <button id="wbExport" title="Export as PNG">⬇ Export</button>
+        <button id="wbClear" title="Clear board">🗑 Clear</button>
+        <button id="wbClose" title="Close">✕</button>
+      </div>
+    </div>
+    <div class="wb-viewport" id="wbViewport">
+      <canvas id="wbCanvas"></canvas>
+      <div class="wb-world" id="wbWorld"></div>
+    </div>
+    <div class="wb-toolbar">
+      <button class="wb-tool on" id="wbToolSelect" data-tool="select" title="Select / Move (V)">🖱</button>
+      <button class="wb-tool" id="wbToolPen" data-tool="pen" title="Pen — pressure-sensitive on stylus (P)">✏️</button>
+      <button class="wb-tool" id="wbToolEraser" data-tool="eraser" title="Eraser (E)">🧹</button>
+      <button class="wb-tool" id="wbToolSticky" data-tool="sticky" title="Sticky note (S)">🗒</button>
+      <button class="wb-tool" id="wbToolText" data-tool="text" title="Text (T)">🔤</button>
+      <button class="wb-tool" id="wbToolRect" data-tool="rect" title="Rectangle (R)">▭</button>
+      <button class="wb-tool" id="wbToolEllipse" data-tool="ellipse" title="Ellipse (O)">⬭</button>
+      <button class="wb-tool" id="wbToolArrow" data-tool="arrow" title="Arrow (L)">↗</button>
+      <div class="wb-sep"></div>
+      <div class="wb-swatch active" style="background:#EDEEF0" data-color="#EDEEF0"></div>
+      <div class="wb-swatch" style="background:#FF6B6B" data-color="#FF6B6B"></div>
+      <div class="wb-swatch" style="background:#FFD166" data-color="#FFD166"></div>
+      <div class="wb-swatch" style="background:#33E6B0" data-color="#33E6B0"></div>
+      <div class="wb-swatch" style="background:#4D96FF" data-color="#4D96FF"></div>
+      <div class="wb-swatch" style="background:#C77DFF" data-color="#C77DFF"></div>
+      <input type="color" id="wbColorCustom" value="#ffffff" title="Custom color">
+      <div class="wb-sep"></div>
+      <input type="range" id="wbStrokeWidth" min="1" max="16" value="3" title="Stroke width">
     </div>
   </div>
 
@@ -1141,7 +1237,8 @@ async function handleFile(file){
   let meta = library[id];
   if(!meta){
     meta = { id, title:file.name, ext, format, progress:0, lastOpened:Date.now(),
-      currentPage:1, totalPages:1, scrollRatio:0, highlights:[], notes:[], stamps:[], drawings:[], bookmark:null, hasFile:true };
+      currentPage:1, totalPages:1, scrollRatio:0, highlights:[], notes:[], stamps:[], drawings:[], bookmark:null,
+      whiteboard:null, hasFile:true };
   } else {
     meta.lastOpened = Date.now();
     meta.hasFile = true;
@@ -1204,6 +1301,7 @@ async function openBook(meta, file){
   document.getElementById('aiPanel').classList.remove('show');
   document.getElementById('selPopover').classList.remove('show');
   document.getElementById('coverArtOverlay').classList.remove('show');
+  document.getElementById('wbOverlay').classList.remove('show');
   setTool('select');
   stopTTS();
   screen('reader');
@@ -3266,6 +3364,470 @@ document.getElementById('signOutBtn').addEventListener('click', async ()=>{
   applyUserProfileUI();
   initGoogleSignIn();
   toast('Signed out');
+});
+
+/* ============ WHITEBOARD ============
+   Infinite pan/zoom canvas. Freehand pen strokes render on a plain
+   <canvas> (redrawn each frame from world coordinates — the standard
+   approach for infinite canvases, since a canvas can't itself be
+   infinite). Sticky notes, text, and shapes are real DOM elements inside
+   a CSS-transformed "world" div, so they stay natively editable/
+   draggable/resizable at any zoom level — that's genuinely how Miro's
+   own architecture works (a mix of canvas + DOM/vector layers, not one
+   giant raster canvas). Pen pressure comes straight from the browser's
+   Pointer Events API (e.pressure, e.pointerType) — real hardware data
+   from Apple Pencil / S Pen / Surface Pen on browsers that expose it,
+   not simulated. */
+
+let wbView = { x:0, y:0, zoom:1 };
+let wbTool = 'select';
+let wbColor = '#EDEEF0';
+let wbStrokeWidth = 3;
+let wbData = null;
+let wbSelectedEl = null;
+let wbUndoStack = [], wbRedoStack = [];
+let wbDrawingStroke = null;
+let wbPanning = false, wbPanStartClient = null, wbPanStartView = null;
+let wbDraggingEl = null, wbDragStartClient = null, wbDragStartPos = null;
+let wbResizingEl = null, wbResizeStart = null;
+let wbShapeDrawStart = null;
+let wbSpaceHeld = false;
+
+function defaultWbData(){ return { strokes:[], elements:[], view:{x:0,y:0,zoom:1} }; }
+
+document.getElementById('whiteboardToggle').addEventListener('click', openWhiteboard);
+document.getElementById('wbClose').addEventListener('click', closeWhiteboard);
+
+function openWhiteboard(){
+  if(!current){ toast('Open a book first.'); return; }
+  wbData = current.whiteboard ? JSON.parse(JSON.stringify(current.whiteboard)) : defaultWbData();
+  wbView = { ...wbData.view };
+  wbUndoStack = []; wbRedoStack = [];
+  wbSelectedEl = null;
+  document.getElementById('wbBookTitle').textContent = '— ' + current.title;
+  document.getElementById('wbOverlay').classList.add('show');
+  setWbTool('select');
+  requestAnimationFrame(()=>{
+    resizeWbCanvas();
+    rebuildWbElements();
+    applyWorldTransform();
+  });
+}
+function closeWhiteboard(){
+  saveWhiteboard();
+  document.getElementById('wbOverlay').classList.remove('show');
+}
+function saveWhiteboard(){
+  if(!wbData || !current) return;
+  wbData.view = { ...wbView };
+  current.whiteboard = JSON.parse(JSON.stringify(wbData));
+  saveMeta();
+}
+
+/* ---------- coordinate transforms ---------- */
+function wbScreenToWorld(clientX, clientY){
+  const r = document.getElementById('wbViewport').getBoundingClientRect();
+  return { x: (clientX - r.left)/wbView.zoom + wbView.x, y: (clientY - r.top)/wbView.zoom + wbView.y };
+}
+function applyWorldTransform(){
+  const world = document.getElementById('wbWorld');
+  world.style.transform = `translate(${-wbView.x*wbView.zoom}px, ${-wbView.y*wbView.zoom}px) scale(${wbView.zoom})`;
+  document.getElementById('wbZoomIndicator').textContent = Math.round(wbView.zoom*100)+'%';
+  redrawWbCanvas();
+}
+function resizeWbCanvas(){
+  const canvas = document.getElementById('wbCanvas');
+  const vp = document.getElementById('wbViewport');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(vp.clientWidth*dpr);
+  canvas.height = Math.floor(vp.clientHeight*dpr);
+  canvas.style.width = vp.clientWidth+'px';
+  canvas.style.height = vp.clientHeight+'px';
+  canvas.getContext('2d').setTransform(dpr,0,0,dpr,0,0);
+  redrawWbCanvas();
+}
+window.addEventListener('resize', ()=>{ if(document.getElementById('wbOverlay').classList.contains('show')) resizeWbCanvas(); });
+
+function redrawWbCanvas(){
+  const canvas = document.getElementById('wbCanvas');
+  const ctx = canvas.getContext('2d');
+  const vp = document.getElementById('wbViewport');
+  ctx.clearRect(0,0,vp.clientWidth,vp.clientHeight);
+  const allStrokes = wbDrawingStroke ? [...wbData.strokes, wbDrawingStroke] : wbData.strokes;
+  allStrokes.forEach(s=>{
+    if(s.points.length<2) return;
+    ctx.strokeStyle = s.color; ctx.lineCap='round'; ctx.lineJoin='round';
+    for(let i=1;i<s.points.length;i++){
+      const p0=s.points[i-1], p1=s.points[i];
+      const sx0=(p0.x-wbView.x)*wbView.zoom, sy0=(p0.y-wbView.y)*wbView.zoom;
+      const sx1=(p1.x-wbView.x)*wbView.zoom, sy1=(p1.y-wbView.y)*wbView.zoom;
+      ctx.lineWidth = Math.max(1, s.width * (p1.pressure||0.5) * 2 * wbView.zoom);
+      ctx.beginPath(); ctx.moveTo(sx0,sy0); ctx.lineTo(sx1,sy1); ctx.stroke();
+    }
+  });
+}
+
+/* ---------- element (sticky/text/shape) rendering ---------- */
+function rebuildWbElements(){
+  const world = document.getElementById('wbWorld');
+  world.innerHTML = '';
+  wbData.elements.forEach(el=> world.appendChild(buildWbElementDOM(el)));
+}
+function buildWbElementDOM(el){
+  let node;
+  if(el.type==='sticky'){
+    node = document.createElement('div');
+    node.contentEditable = 'true';
+    node.className = 'wb-el wb-sticky';
+    node.style.background = el.color;
+    node.textContent = el.text||'';
+    node.addEventListener('input', ()=>{ el.text = node.textContent; });
+    node.addEventListener('pointerdown', e=>e.stopPropagation());
+  } else if(el.type==='text'){
+    node = document.createElement('div');
+    node.contentEditable = 'true';
+    node.className = 'wb-el wb-text';
+    node.style.color = el.color;
+    node.textContent = el.text||'';
+    node.addEventListener('input', ()=>{ el.text = node.textContent; });
+    node.addEventListener('pointerdown', e=>e.stopPropagation());
+  } else if(el.type==='rect'){
+    node = document.createElement('div');
+    node.className = 'wb-el wb-shape';
+    node.style.border = `${el.strokeWidth||3}px solid ${el.color}`;
+    node.style.borderRadius = '4px';
+  } else if(el.type==='ellipse'){
+    node = document.createElement('div');
+    node.className = 'wb-el wb-shape';
+    node.style.border = `${el.strokeWidth||3}px solid ${el.color}`;
+    node.style.borderRadius = '50%';
+  } else if(el.type==='arrow'){
+    node = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    node.setAttribute('class','wb-el wb-shape');
+    node.innerHTML = `<defs><marker id="arrowhead-${el.id}" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="0 0, 8 4, 0 8" fill="${el.color}"/></marker></defs>
+      <line x1="0" y1="0" x2="${el.w}" y2="${el.h}" stroke="${el.color}" stroke-width="${el.strokeWidth||3}" marker-end="url(#arrowhead-${el.id})"/>`;
+    node.setAttribute('viewBox', `0 0 ${el.w||1} ${el.h||1}`);
+  }
+  node.dataset.elId = el.id;
+  node.style.left = el.x+'px'; node.style.top = el.y+'px';
+  if(el.w) node.style.width = el.w+'px';
+  if(el.h) node.style.height = el.h+'px';
+  const handle = document.createElement('div');
+  handle.className = 'wb-resize-handle';
+  handle.addEventListener('pointerdown', e=>{ e.stopPropagation(); startWbResize(el, node, e); });
+  node.appendChild(handle);
+  return node;
+}
+function wbElementNode(id){ return document.querySelector(`.wb-el[data-el-id="${id}"]`); }
+function selectWbElement(el, node){
+  document.querySelectorAll('.wb-el.selected').forEach(n=>n.classList.remove('selected'));
+  wbSelectedEl = el;
+  if(node) node.classList.add('selected');
+}
+function deselectWb(){
+  document.querySelectorAll('.wb-el.selected').forEach(n=>n.classList.remove('selected'));
+  wbSelectedEl = null;
+}
+
+/* ---------- undo/redo (snapshot-based — simple and reliable for this scale) ---------- */
+function wbSnapshot(){ return JSON.stringify(wbData); }
+function wbPushUndo(){
+  wbUndoStack.push(wbSnapshot());
+  if(wbUndoStack.length>50) wbUndoStack.shift();
+  wbRedoStack = [];
+  updateWbUndoButtons();
+}
+function wbRestoreSnapshot(json){
+  wbData = JSON.parse(json);
+  deselectWb();
+  rebuildWbElements();
+  applyWorldTransform();
+}
+document.getElementById('wbUndo').addEventListener('click', ()=>{
+  if(!wbUndoStack.length) return;
+  wbRedoStack.push(wbSnapshot());
+  wbRestoreSnapshot(wbUndoStack.pop());
+  updateWbUndoButtons();
+  saveWhiteboard();
+});
+document.getElementById('wbRedo').addEventListener('click', ()=>{
+  if(!wbRedoStack.length) return;
+  wbUndoStack.push(wbSnapshot());
+  wbRestoreSnapshot(wbRedoStack.pop());
+  updateWbUndoButtons();
+  saveWhiteboard();
+});
+function updateWbUndoButtons(){
+  document.getElementById('wbUndo').disabled = wbUndoStack.length===0;
+  document.getElementById('wbRedo').disabled = wbRedoStack.length===0;
+}
+
+/* ---------- toolbar ---------- */
+const WB_TOOL_BTN = { select:'wbToolSelect', pen:'wbToolPen', eraser:'wbToolEraser', sticky:'wbToolSticky',
+  text:'wbToolText', rect:'wbToolRect', ellipse:'wbToolEllipse', arrow:'wbToolArrow' };
+function setWbTool(t){
+  wbTool = t;
+  Object.entries(WB_TOOL_BTN).forEach(([k,id])=> document.getElementById(id).classList.toggle('on', k===t));
+  const vp = document.getElementById('wbViewport');
+  vp.style.cursor = t==='select' ? 'default' : t==='eraser' ? 'cell' : t==='pen' ? 'crosshair' : 'copy';
+}
+Object.entries(WB_TOOL_BTN).forEach(([k,id])=> document.getElementById(id).addEventListener('click', ()=>setWbTool(k)));
+document.querySelectorAll('.wb-swatch').forEach(sw=>{
+  sw.addEventListener('click', ()=>{
+    document.querySelectorAll('.wb-swatch').forEach(s=>s.classList.remove('active'));
+    sw.classList.add('active');
+    wbColor = sw.dataset.color;
+  });
+});
+document.getElementById('wbColorCustom').addEventListener('input', (e)=>{
+  wbColor = e.target.value;
+  document.querySelectorAll('.wb-swatch').forEach(s=>s.classList.remove('active'));
+});
+document.getElementById('wbStrokeWidth').addEventListener('input', (e)=>{ wbStrokeWidth = parseInt(e.target.value); });
+
+/* ---------- pointer interaction (pen / eraser / select-move-resize / pan / shapes) ---------- */
+const wbViewportEl = () => document.getElementById('wbViewport');
+
+document.getElementById('wbViewport').addEventListener('pointerdown', (e)=>{
+  const target = e.target;
+  const elNode = target.closest('.wb-el');
+
+  // Space+drag or middle-mouse always pans, regardless of tool
+  if(wbSpaceHeld || e.button===1){
+    wbPanning = true; wbPanStartClient = {x:e.clientX,y:e.clientY}; wbPanStartView = {...wbView};
+    return;
+  }
+
+  if(wbTool==='pen'){
+    const p = wbScreenToWorld(e.clientX, e.clientY);
+    wbDrawingStroke = { id:'s'+Date.now(), color:wbColor, width:wbStrokeWidth, points:[{x:p.x,y:p.y,pressure:e.pressure||0.5}] };
+    wbViewportEl().setPointerCapture(e.pointerId);
+    return;
+  }
+  if(wbTool==='eraser'){
+    wbPushUndo();
+    wbEraseAt(e.clientX, e.clientY);
+    wbViewportEl().setPointerCapture(e.pointerId);
+    return;
+  }
+  if(['sticky','text','rect','ellipse','arrow'].includes(wbTool)){
+    const p = wbScreenToWorld(e.clientX, e.clientY);
+    wbShapeDrawStart = p;
+    if(wbTool==='sticky' || wbTool==='text'){
+      wbPushUndo();
+      const el = wbTool==='sticky'
+        ? { id:'e'+Date.now(), type:'sticky', x:p.x-90, y:p.y-70, w:180, h:140, color:wbColor, text:'' }
+        : { id:'e'+Date.now(), type:'text', x:p.x, y:p.y-14, color:wbColor, text:'Text' };
+      wbData.elements.push(el);
+      const node = buildWbElementDOM(el);
+      document.getElementById('wbWorld').appendChild(node);
+      selectWbElement(el, node);
+      setWbTool('select');
+      setTimeout(()=>{ node.focus(); if(wbTool==='text') document.execCommand('selectAll'); }, 30);
+      saveWhiteboard();
+    }
+    return;
+  }
+  if(wbTool==='select'){
+    if(elNode){
+      const el = wbData.elements.find(x=>x.id===elNode.dataset.elId);
+      if(el){
+        selectWbElement(el, elNode);
+        wbPushUndo();
+        wbDraggingEl = el; wbDragStartClient = {x:e.clientX,y:e.clientY}; wbDragStartPos = {x:el.x,y:el.y};
+        wbViewportEl().setPointerCapture(e.pointerId);
+      }
+    } else {
+      deselectWb();
+      wbPanning = true; wbPanStartClient = {x:e.clientX,y:e.clientY}; wbPanStartView = {...wbView};
+    }
+  }
+});
+
+document.getElementById('wbViewport').addEventListener('pointermove', (e)=>{
+  if(wbPanning){
+    const dx = e.clientX - wbPanStartClient.x, dy = e.clientY - wbPanStartClient.y;
+    wbView.x = wbPanStartView.x - dx/wbView.zoom;
+    wbView.y = wbPanStartView.y - dy/wbView.zoom;
+    applyWorldTransform();
+    return;
+  }
+  if(wbDrawingStroke){
+    const p = wbScreenToWorld(e.clientX, e.clientY);
+    wbDrawingStroke.points.push({x:p.x, y:p.y, pressure:e.pressure||0.5});
+    redrawWbCanvas();
+    return;
+  }
+  if(wbTool==='eraser' && e.buttons===1){
+    wbEraseAt(e.clientX, e.clientY);
+    return;
+  }
+  if(wbDraggingEl){
+    const dx = (e.clientX - wbDragStartClient.x)/wbView.zoom, dy = (e.clientY - wbDragStartClient.y)/wbView.zoom;
+    wbDraggingEl.x = wbDragStartPos.x + dx; wbDraggingEl.y = wbDragStartPos.y + dy;
+    const node = wbElementNode(wbDraggingEl.id);
+    if(node){ node.style.left = wbDraggingEl.x+'px'; node.style.top = wbDraggingEl.y+'px'; }
+    return;
+  }
+  if(wbResizingEl){
+    const dx = (e.clientX - wbResizeStart.clientX)/wbView.zoom, dy = (e.clientY - wbResizeStart.clientY)/wbView.zoom;
+    wbResizingEl.w = Math.max(24, wbResizeStart.w + dx);
+    wbResizingEl.h = Math.max(24, wbResizeStart.h + dy);
+    const node = wbElementNode(wbResizingEl.id);
+    if(node){
+      node.style.width = wbResizingEl.w+'px'; node.style.height = wbResizingEl.h+'px';
+      if(wbResizingEl.type==='arrow'){
+        node.setAttribute('viewBox', `0 0 ${wbResizingEl.w} ${wbResizingEl.h}`);
+        node.querySelector('line').setAttribute('x2', wbResizingEl.w);
+        node.querySelector('line').setAttribute('y2', wbResizingEl.h);
+      }
+    }
+    return;
+  }
+});
+
+document.getElementById('wbViewport').addEventListener('pointerup', (e)=>{
+  if(wbDrawingStroke){
+    if(wbDrawingStroke.points.length>1) wbData.strokes.push(wbDrawingStroke);
+    wbDrawingStroke = null;
+    saveWhiteboard();
+    wbPushUndo(); // snapshot AFTER the stroke so undo removes exactly this stroke
+    return;
+  }
+  if(['rect','ellipse','arrow'].includes(wbTool) && wbShapeDrawStart){
+    const p = wbScreenToWorld(e.clientX, e.clientY);
+    const x = Math.min(wbShapeDrawStart.x, p.x), y = Math.min(wbShapeDrawStart.y, p.y);
+    const w = Math.max(20, Math.abs(p.x-wbShapeDrawStart.x)), h = Math.max(20, Math.abs(p.y-wbShapeDrawStart.y));
+    wbPushUndo();
+    const el = { id:'e'+Date.now(), type:wbTool, x, y, w, h, color:wbColor, strokeWidth:wbStrokeWidth };
+    wbData.elements.push(el);
+    document.getElementById('wbWorld').appendChild(buildWbElementDOM(el));
+    wbShapeDrawStart = null;
+    setWbTool('select');
+    saveWhiteboard();
+    return;
+  }
+  if(wbDraggingEl || wbResizingEl){
+    saveWhiteboard();
+    wbDraggingEl = null; wbResizingEl = null;
+    return;
+  }
+  wbPanning = false;
+});
+function startWbResize(el, node, e){
+  wbPushUndo();
+  wbResizingEl = el;
+  wbResizeStart = { clientX:e.clientX, clientY:e.clientY, w:el.w||100, h:el.h||100 };
+  wbViewportEl().setPointerCapture(e.pointerId);
+}
+
+function wbEraseAt(clientX, clientY){
+  const p = wbScreenToWorld(clientX, clientY);
+  const tol = 14/wbView.zoom;
+  const beforeStrokeCount = wbData.strokes.length;
+  wbData.strokes = wbData.strokes.filter(s=> !s.points.some(pt=> Math.hypot(pt.x-p.x, pt.y-p.y) < tol));
+  const beforeElCount = wbData.elements.length;
+  wbData.elements = wbData.elements.filter(el=>{
+    const w=el.w||20, h=el.h||20;
+    const hit = p.x>=el.x && p.x<=el.x+w && p.y>=el.y && p.y<=el.y+h;
+    if(hit){ const node = wbElementNode(el.id); if(node) node.remove(); }
+    return !hit;
+  });
+  if(wbData.strokes.length!==beforeStrokeCount || wbData.elements.length!==beforeElCount){
+    redrawWbCanvas();
+    saveWhiteboard();
+  }
+}
+
+/* ---------- zoom (wheel + buttons) ---------- */
+document.getElementById('wbViewport').addEventListener('wheel', (e)=>{
+  e.preventDefault();
+  if(e.ctrlKey || e.metaKey || Math.abs(e.deltaY)>0){
+    const factor = e.deltaY<0 ? 1.08 : 1/1.08;
+    wbZoomAt(e.clientX, e.clientY, factor);
+  }
+}, { passive:false });
+function wbZoomAt(clientX, clientY, factor){
+  const before = wbScreenToWorld(clientX, clientY);
+  wbView.zoom = Math.max(0.1, Math.min(4, wbView.zoom*factor));
+  const r = document.getElementById('wbViewport').getBoundingClientRect();
+  wbView.x = before.x - (clientX-r.left)/wbView.zoom;
+  wbView.y = before.y - (clientY-r.top)/wbView.zoom;
+  applyWorldTransform();
+}
+document.getElementById('wbZoomIn').addEventListener('click', ()=>{
+  const r = document.getElementById('wbViewport').getBoundingClientRect();
+  wbZoomAt(r.left+r.width/2, r.top+r.height/2, 1.2);
+});
+document.getElementById('wbZoomOut').addEventListener('click', ()=>{
+  const r = document.getElementById('wbViewport').getBoundingClientRect();
+  wbZoomAt(r.left+r.width/2, r.top+r.height/2, 1/1.2);
+});
+document.getElementById('wbZoomReset').addEventListener('click', ()=>{
+  wbView = {x:0,y:0,zoom:1}; applyWorldTransform();
+});
+
+/* ---------- clear / export ---------- */
+document.getElementById('wbClear').addEventListener('click', ()=>{
+  showConfirm('Clear the whole board?', 'Every stroke, sticky note, and shape on this book\'s whiteboard will be removed. This can\'t be undone.', ()=>{
+    wbData = defaultWbData();
+    wbView = {x:0,y:0,zoom:1};
+    wbUndoStack=[]; wbRedoStack=[];
+    rebuildWbElements();
+    applyWorldTransform();
+    saveWhiteboard();
+    toast('Board cleared');
+  });
+});
+document.getElementById('wbExport').addEventListener('click', async ()=>{
+  if(typeof html2canvas === 'undefined'){
+    toast('Export library not available — try again in a moment.');
+    return;
+  }
+  toast('Exporting…');
+  try{
+    const canvas = await html2canvas(document.getElementById('wbViewport'), { backgroundColor:'#0B0D10' });
+    canvas.toBlob(blob=>{
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = (current.title||'whiteboard').replace(/\.[^.]+$/,'')+'-whiteboard.png';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url), 3000);
+    });
+  }catch(err){
+    console.error('whiteboard export failed', err);
+    toast('Export failed: ' + err.message);
+  }
+});
+
+/* ---------- keyboard: shortcuts, delete, undo/redo, space-to-pan ---------- */
+document.addEventListener('keydown', (e)=>{
+  if(!document.getElementById('wbOverlay').classList.contains('show')) return;
+  if(e.code==='Space'){ wbSpaceHeld = true; document.getElementById('wbViewport').style.cursor='grab'; e.preventDefault(); return; }
+  const tag = document.activeElement && document.activeElement.tagName;
+  const isEditing = document.activeElement && document.activeElement.isContentEditable;
+  if(tag==='INPUT') return;
+
+  if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z' && !e.shiftKey){ e.preventDefault(); document.getElementById('wbUndo').click(); return; }
+  if((e.ctrlKey||e.metaKey) && (e.key.toLowerCase()==='y' || (e.key.toLowerCase()==='z'&&e.shiftKey))){ e.preventDefault(); document.getElementById('wbRedo').click(); return; }
+  if(isEditing) return; // don't hijack typing inside a sticky/text element
+
+  if((e.key==='Delete'||e.key==='Backspace') && wbSelectedEl){
+    e.preventDefault();
+    wbPushUndo();
+    wbData.elements = wbData.elements.filter(x=>x.id!==wbSelectedEl.id);
+    const node = wbElementNode(wbSelectedEl.id);
+    if(node) node.remove();
+    wbSelectedEl = null;
+    saveWhiteboard();
+    return;
+  }
+  const map = { v:'select', p:'pen', e:'eraser', s:'sticky', t:'text', r:'rect', o:'ellipse', l:'arrow' };
+  if(map[e.key.toLowerCase()]){ setWbTool(map[e.key.toLowerCase()]); }
+  if(e.key==='Escape'){ closeWhiteboard(); }
+});
+document.addEventListener('keyup', (e)=>{
+  if(e.code==='Space'){ wbSpaceHeld = false; if(document.getElementById('wbOverlay').classList.contains('show')) document.getElementById('wbViewport').style.cursor = wbTool==='select'?'default':'crosshair'; }
 });
 
 /* ============ BOOT ============ */
