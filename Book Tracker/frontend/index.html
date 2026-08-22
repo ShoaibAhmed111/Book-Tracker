@@ -539,7 +539,8 @@
   .wb-zoom-indicator{ font-size:12px; color:var(--muted); font-family:'IBM Plex Mono',monospace; min-width:42px; text-align:center; }
 
   .wb-viewport{ flex:1; position:relative; overflow:hidden; background:
-    radial-gradient(circle, var(--line) 1px, transparent 1px) 0 0 / 26px 26px, var(--ink); cursor:crosshair; }
+    radial-gradient(circle, var(--line) 1px, transparent 1px) 0 0 / 26px 26px, var(--ink); cursor:crosshair;
+    touch-action:none; }
   .wb-world{ position:absolute; left:0; top:0; transform-origin:0 0; will-change:transform; }
   #wbCanvas{ position:absolute; inset:0; pointer-events:none; }
 
@@ -586,7 +587,7 @@
     <div class="topbar">
       <div class="brand"><div class="brand-mark"></div><div class="brand-name">Book Tracker</div></div>
       <div class="topbar-right">
-        <div class="version-badge mono" id="versionBadge">v1.7.0</div>
+        <div class="version-badge mono" id="versionBadge">v1.7.1</div>
         <div id="googleSignInContainer"></div>
         <button class="google-btn" id="googleBtnFallback" style="display:none;">
           <span>Sign in with Google</span>
@@ -3392,6 +3393,8 @@ let wbDraggingEl = null, wbDragStartClient = null, wbDragStartPos = null;
 let wbResizingEl = null, wbResizeStart = null;
 let wbShapeDrawStart = null;
 let wbSpaceHeld = false;
+let wbActiveTouches = new Map(); // pointerId -> {x,y}, touch pointers only — real multi-touch, touchscreens only
+let wbTwoFingerStroke = null;
 
 function defaultWbData(){ return { strokes:[], elements:[], view:{x:0,y:0,zoom:1} }; }
 
@@ -3400,6 +3403,8 @@ document.getElementById('wbClose').addEventListener('click', closeWhiteboard);
 
 function openWhiteboard(){
   if(!current){ toast('Open a book first.'); return; }
+  wbActiveTouches.clear();
+  wbTwoFingerStroke = null;
   wbData = current.whiteboard ? JSON.parse(JSON.stringify(current.whiteboard)) : defaultWbData();
   wbView = { ...wbData.view };
   wbUndoStack = []; wbRedoStack = [];
@@ -3453,7 +3458,8 @@ function redrawWbCanvas(){
   const ctx = canvas.getContext('2d');
   const vp = document.getElementById('wbViewport');
   ctx.clearRect(0,0,vp.clientWidth,vp.clientHeight);
-  const allStrokes = wbDrawingStroke ? [...wbData.strokes, wbDrawingStroke] : wbData.strokes;
+  const inProgress = [wbDrawingStroke, wbTwoFingerStroke].filter(Boolean);
+  const allStrokes = inProgress.length ? [...wbData.strokes, ...inProgress] : wbData.strokes;
   allStrokes.forEach(s=>{
     if(s.points.length<2) return;
     ctx.strokeStyle = s.color; ctx.lineCap='round'; ctx.lineJoin='round';
@@ -3592,6 +3598,25 @@ document.getElementById('wbViewport').addEventListener('pointerdown', (e)=>{
   const target = e.target;
   const elNode = target.closest('.wb-el');
 
+  // Real multi-touch (touchscreens only — a plain trackpad can't report
+  // this to a browser at all, see note in Settings/README). Track every
+  // active touch point so we can detect exactly-two-fingers-down.
+  if(e.pointerType==='touch'){
+    wbActiveTouches.set(e.pointerId, {x:e.clientX, y:e.clientY});
+    if(wbTool==='pen' && wbActiveTouches.size===2){
+      // A second finger just joined — cancel any single-finger stroke that
+      // was starting, and begin a two-finger stroke at the midpoint instead.
+      wbDrawingStroke = null;
+      const pts = [...wbActiveTouches.values()];
+      const mid = { x:(pts[0].x+pts[1].x)/2, y:(pts[0].y+pts[1].y)/2 };
+      const p = wbScreenToWorld(mid.x, mid.y);
+      wbTwoFingerStroke = { id:'s'+Date.now(), color:wbColor, width:wbStrokeWidth*1.4, points:[{x:p.x,y:p.y,pressure:0.7}] };
+      wbViewportEl().setPointerCapture(e.pointerId);
+      return;
+    }
+    if(wbActiveTouches.size>=2) return; // third+ finger while already two-finger drawing — ignore
+  }
+
   // Space+drag or middle-mouse always pans, regardless of tool
   if(wbSpaceHeld || e.button===1){
     wbPanning = true; wbPanStartClient = {x:e.clientX,y:e.clientY}; wbPanStartView = {...wbView};
@@ -3645,6 +3670,17 @@ document.getElementById('wbViewport').addEventListener('pointerdown', (e)=>{
 });
 
 document.getElementById('wbViewport').addEventListener('pointermove', (e)=>{
+  if(e.pointerType==='touch' && wbActiveTouches.has(e.pointerId)){
+    wbActiveTouches.set(e.pointerId, {x:e.clientX, y:e.clientY});
+    if(wbTwoFingerStroke && wbActiveTouches.size===2){
+      const pts = [...wbActiveTouches.values()];
+      const mid = { x:(pts[0].x+pts[1].x)/2, y:(pts[0].y+pts[1].y)/2 };
+      const p = wbScreenToWorld(mid.x, mid.y);
+      wbTwoFingerStroke.points.push({x:p.x, y:p.y, pressure:0.7});
+      redrawWbCanvas();
+      return;
+    }
+  }
   if(wbPanning){
     const dx = e.clientX - wbPanStartClient.x, dy = e.clientY - wbPanStartClient.y;
     wbView.x = wbPanStartView.x - dx/wbView.zoom;
@@ -3687,6 +3723,18 @@ document.getElementById('wbViewport').addEventListener('pointermove', (e)=>{
 });
 
 document.getElementById('wbViewport').addEventListener('pointerup', (e)=>{
+  if(e.pointerType==='touch') wbActiveTouches.delete(e.pointerId);
+  if(wbTwoFingerStroke && wbActiveTouches.size<2){
+    if(wbTwoFingerStroke.points.length>1){
+      wbTwoFingerStroke.points = chaikinSmooth(wbTwoFingerStroke.points, 2);
+      wbData.strokes.push(wbTwoFingerStroke);
+      saveWhiteboard();
+      wbPushUndo();
+    }
+    wbTwoFingerStroke = null;
+    redrawWbCanvas();
+    return;
+  }
   if(wbDrawingStroke){
     if(wbDrawingStroke.points.length>1) wbData.strokes.push(wbDrawingStroke);
     wbDrawingStroke = null;
@@ -3713,6 +3761,10 @@ document.getElementById('wbViewport').addEventListener('pointerup', (e)=>{
     return;
   }
   wbPanning = false;
+});
+document.getElementById('wbViewport').addEventListener('pointercancel', (e)=>{
+  if(e.pointerType==='touch') wbActiveTouches.delete(e.pointerId);
+  if(wbActiveTouches.size<2 && wbTwoFingerStroke){ wbTwoFingerStroke=null; redrawWbCanvas(); }
 });
 function startWbResize(el, node, e){
   wbPushUndo();
