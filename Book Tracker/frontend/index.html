@@ -307,7 +307,7 @@
 
   /* ---------- MODAL (settings) ---------- */
   .modal-overlay{ position:absolute; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center;
-    justify-content:center; z-index:60; }
+    justify-content:center; z-index:250; }
   .modal-overlay.show{ display:flex; }
   .modal{ width:420px; max-width:90vw; background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:24px; }
   .modal h2{ font-family:'Fraunces',serif; font-weight:500; font-size:20px; margin:0 0 4px; }
@@ -587,7 +587,7 @@
     <div class="topbar">
       <div class="brand"><div class="brand-mark"></div><div class="brand-name">Book Tracker</div></div>
       <div class="topbar-right">
-        <div class="version-badge mono" id="versionBadge">v1.7.1</div>
+        <div class="version-badge mono" id="versionBadge">v1.7.2</div>
         <div id="googleSignInContainer"></div>
         <button class="google-btn" id="googleBtnFallback" style="display:none;">
           <span>Sign in with Google</span>
@@ -2443,7 +2443,7 @@ function eraseAtPoint(clientX, clientY){
     return true;
   }
   const bm = el.closest('.bookmark-marker');
-  if(bm){ clearBookmarkDom(); current.bookmark = null; saveMeta(); renderDrawer(); return true; }
+  if(bm){ clearBookmark(); return true; }
 
   const wrap = el.closest('.pdf-page-wrap');
   if(wrap){
@@ -2509,7 +2509,11 @@ function placeBookmark(range, container, pdfPage){
   icon.className = 'bookmark-marker';
   icon.textContent = '🔖';
   icon.title = 'Your bookmark — click to remove';
-  try{ range.insertNode(icon); }catch(e){ return; }
+  try{ range.insertNode(icon); }catch(e){
+    console.warn('bookmark placement failed', e);
+    toast('Couldn\'t place a bookmark there — try clicking directly on a word.');
+    return;
+  }
   const snippetSource = range.startContainer.textContent || '';
   current.bookmark = {
     start: offset, page: pdfPage||null,
@@ -3725,6 +3729,7 @@ document.getElementById('wbViewport').addEventListener('pointermove', (e)=>{
 document.getElementById('wbViewport').addEventListener('pointerup', (e)=>{
   if(e.pointerType==='touch') wbActiveTouches.delete(e.pointerId);
   if(wbTwoFingerStroke && wbActiveTouches.size<2){
+    if(wbTwoFingerStroke.points.length===1) wbTwoFingerStroke.points.push({...wbTwoFingerStroke.points[0]});
     if(wbTwoFingerStroke.points.length>1){
       wbTwoFingerStroke.points = chaikinSmooth(wbTwoFingerStroke.points, 2);
       wbData.strokes.push(wbTwoFingerStroke);
@@ -3736,7 +3741,8 @@ document.getElementById('wbViewport').addEventListener('pointerup', (e)=>{
     return;
   }
   if(wbDrawingStroke){
-    if(wbDrawingStroke.points.length>1) wbData.strokes.push(wbDrawingStroke);
+    if(wbDrawingStroke.points.length===1) wbDrawingStroke.points.push({...wbDrawingStroke.points[0]}); // click-with-no-drag → still a dot
+    wbData.strokes.push(wbDrawingStroke);
     wbDrawingStroke = null;
     saveWhiteboard();
     wbPushUndo(); // snapshot AFTER the stroke so undo removes exactly this stroke
