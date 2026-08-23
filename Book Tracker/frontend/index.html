@@ -288,6 +288,8 @@
     border:1px solid var(--line); padding:10px 18px; border-radius:9px; font-size:13px; color:var(--paper);
     opacity:0; pointer-events:none; transition:.25s; z-index:80; max-width:80%; text-align:center; }
   .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  .toast-undo-btn{ pointer-events:auto; margin-left:10px; background:var(--signal); color:#06110D; border:none;
+    font-weight:600; font-size:12px; padding:4px 10px; border-radius:6px; cursor:pointer; }
 
   .hidden-input{ display:none; }
   #dropHint{ position:absolute; inset:0; background:rgba(11,13,16,.85); display:none; align-items:center;
@@ -587,7 +589,7 @@
     <div class="topbar">
       <div class="brand"><div class="brand-mark"></div><div class="brand-name">Book Tracker</div></div>
       <div class="topbar-right">
-        <div class="version-badge mono" id="versionBadge">v1.7.2</div>
+        <div class="version-badge mono" id="versionBadge">v1.8.0</div>
         <div id="googleSignInContainer"></div>
         <button class="google-btn" id="googleBtnFallback" style="display:none;">
           <span>Sign in with Google</span>
@@ -861,6 +863,15 @@
       </div>
       <div class="field">
         <div class="storage-line" id="storageLine">Checking storage usage…</div>
+      </div>
+      <div class="field">
+        <label>Backup your library</label>
+        <div class="hint" style="margin-bottom:10px;">Everything here — the app's only copy of your highlights, notes, bookmarks, and progress — lives in this one browser. Nothing is backed up anywhere else. Download a backup regularly, especially before clearing browser data or switching computers.</div>
+        <div style="display:flex; gap:8px;">
+          <button class="ghost-btn" id="exportBackupBtn" style="padding:8px 14px; font-size:12px; flex:1;">⬇ Export backup</button>
+          <button class="ghost-btn" id="importBackupBtn" style="padding:8px 14px; font-size:12px; flex:1;">⬆ Import backup</button>
+        </div>
+        <input type="file" id="importBackupInput" accept=".json" style="display:none;">
       </div>
       <div class="modal-actions">
         <button class="ghost-btn" id="checkUpdateBtn" style="padding:8px 14px; font-size:12px;">Check for updates</button>
@@ -2429,21 +2440,34 @@ function eraseAtPoint(clientX, clientY){
   const mark = el.closest('mark[data-hl-id]');
   if(mark){
     const id = mark.dataset.hlId;
+    const record = (current.highlights||[]).find(h=>h.id===id);
+    const linkedNote = (current.notes||[]).find(n=>n.highlightId===id);
+    const container = mark.closest('#textInner') || mark.closest('.textLayer');
     removeHighlight(id);
     current.notes = (current.notes||[]).filter(n=>n.highlightId!==id);
     saveMeta(); renderDrawer();
+    if(record) eraseSessionLog.push({kind:'highlight', record:{...record}, linkedNote: linkedNote?{...linkedNote}:null, container});
     return true;
   }
   const stamp = el.closest('.stamp-marker');
   if(stamp){
     const id = stamp.dataset.stampId;
+    const record = (current.stamps||[]).find(s=>s.id===id);
+    const container = stamp.closest('#textInner') || stamp.closest('.textLayer');
     current.stamps = (current.stamps||[]).filter(s=>s.id!==id);
     document.querySelectorAll(`.stamp-marker[data-stamp-id="${id}"]`).forEach(x=>x.remove());
     saveMeta(); renderDrawer();
+    if(record) eraseSessionLog.push({kind:'stamp', record:{...record}, container});
     return true;
   }
   const bm = el.closest('.bookmark-marker');
-  if(bm){ clearBookmark(); return true; }
+  if(bm){
+    const record = current.bookmark ? {...current.bookmark} : null;
+    const container = bm.closest('#textInner') || bm.closest('.textLayer');
+    clearBookmark();
+    if(record) eraseSessionLog.push({kind:'bookmark', record, container});
+    return true;
+  }
 
   const wrap = el.closest('.pdf-page-wrap');
   if(wrap){
@@ -2459,18 +2483,59 @@ function eraseAtPoint(clientX, clientY){
       });
     });
     if(hitId && bestDist<=TOL){
+      const record = current.drawings.find(d=>d.id===hitId);
       current.drawings = (current.drawings||[]).filter(d=>d.id!==hitId);
       saveMeta(); renderDrawer();
       const canvas = wrap.querySelector('.ink-canvas');
       if(canvas) redrawInk(canvas, pageNum);
+      if(record) eraseSessionLog.push({kind:'drawing', record:{...record}, pageNum});
       return true;
     }
   }
   return false;
 }
+let eraseSessionLog = [];
+function undoLastErase(){
+  const log = eraseSessionLog;
+  if(!log.length) return;
+  log.forEach(item=>{
+    if(item.kind==='highlight' && item.container){
+      current.highlights = current.highlights||[];
+      current.highlights.push(item.record);
+      const r = buildRangeFromOffsets(item.container, item.record.start, item.record.end);
+      if(r) wrapRangeWithMark(r, item.record.color, item.record.id);
+      if(item.linkedNote){ current.notes = current.notes||[]; current.notes.push(item.linkedNote); }
+    } else if(item.kind==='stamp' && item.container){
+      current.stamps = current.stamps||[];
+      current.stamps.push(item.record);
+      const r = buildRangeFromOffsets(item.container, item.record.start, item.record.start);
+      if(r){
+        const icon = document.createElement('span');
+        icon.className = 'stamp-marker'; icon.textContent = item.record.icon;
+        icon.dataset.stampId = item.record.id; icon.title = 'Click to remove';
+        try{ r.insertNode(icon); }catch(e){}
+      }
+    } else if(item.kind==='bookmark' && item.container){
+      current.bookmark = item.record;
+      reapplyBookmark(item.container, item.record.page||null);
+      recomputeProgressFromBookmark();
+    } else if(item.kind==='drawing'){
+      current.drawings = current.drawings||[];
+      current.drawings.push(item.record);
+      const wrap = document.querySelector(`.pdf-page-wrap[data-page-num="${item.pageNum}"]`);
+      const canvas = wrap && wrap.querySelector('.ink-canvas');
+      if(canvas) redrawInk(canvas, item.pageNum);
+    }
+  });
+  saveMeta(); renderDrawer();
+  eraseSessionLog = [];
+  document.getElementById('toast').classList.remove('show');
+  toast('Restored');
+}
 document.addEventListener('pointerdown', (e)=>{
   if(tool!=='eraser') return;
   eraserDown = true;
+  eraseSessionLog = [];
   document.body.classList.add('erasing-drag');
   if(eraseAtPoint(e.clientX, e.clientY)) flashEraserCursor();
 });
@@ -2479,8 +2544,23 @@ document.addEventListener('pointermove', (e)=>{
   if(!eraserDown || tool!=='eraser') return;
   if(eraseAtPoint(e.clientX, e.clientY)) flashEraserCursor();
 });
-document.addEventListener('pointerup', ()=>{ eraserDown = false; document.body.classList.remove('erasing-drag'); });
+document.addEventListener('pointerup', ()=>{
+  eraserDown = false;
+  document.body.classList.remove('erasing-drag');
+  if(eraseSessionLog.length) showUndoToast(eraseSessionLog.length);
+});
 document.addEventListener('pointercancel', ()=>{ eraserDown = false; document.body.classList.remove('erasing-drag'); });
+function showUndoToast(count){
+  const t = document.getElementById('toast');
+  t.innerHTML = `Erased ${count} item${count>1?'s':''} <button id="undoEraseBtn" class="toast-undo-btn">Undo</button>`;
+  t.classList.add('show');
+  clearTimeout(toast._h);
+  toast._h = setTimeout(()=>t.classList.remove('show'), 5000);
+  document.getElementById('undoEraseBtn').addEventListener('click', (e)=>{
+    e.stopPropagation();
+    undoLastErase();
+  });
+}
 
 function updateEraserCursor(x, y){
   const cur = document.getElementById('eraserCursor');
@@ -3052,6 +3132,59 @@ async function refreshStorageLine(){
     line.textContent = 'Storage usage unavailable in this browser.';
   }
 }
+
+/* ---------- Backup: export/import your reading data (highlights, notes,
+   bookmarks, whiteboards, progress) — NOT the original book files, since
+   those are large and you already have them. Re-add files after importing
+   on a new browser/computer to relink them. ---------- */
+document.getElementById('exportBackupBtn').addEventListener('click', async ()=>{
+  try{
+    const books = await idbAll('meta');
+    if(!books.length){ toast('Your shelf is empty — nothing to back up yet.'); return; }
+    const payload = { app:'book-tracker', version:1, exportedAt:Date.now(), books };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `book-tracker-backup-${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 3000);
+    toast(`Backed up ${books.length} book${books.length>1?'s':''}`);
+  }catch(err){
+    console.error('export backup failed', err);
+    toast('Backup failed: ' + err.message);
+  }
+});
+document.getElementById('importBackupBtn').addEventListener('click', ()=>{
+  document.getElementById('importBackupInput').click();
+});
+document.getElementById('importBackupInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  e.target.value = '';
+  if(!file) return;
+  try{
+    const text = await file.text();
+    const payload = JSON.parse(text);
+    if(!payload || !Array.isArray(payload.books)) throw new Error('This doesn\'t look like a Book Tracker backup file.');
+    const existingIds = new Set(Object.keys(library));
+    const newCount = payload.books.filter(b=>!existingIds.has(b.id)).length;
+    const updateCount = payload.books.length - newCount;
+    showConfirm(
+      `Import ${payload.books.length} book${payload.books.length>1?'s':''}?`,
+      `${updateCount} will update your existing highlights/notes/progress for books already on this shelf. ${newCount} will be added as new — you'll need to reopen their original files afterward to relink them, since backups don't include the file itself.`,
+      async ()=>{
+        for(const book of payload.books){
+          const keepsFile = library[book.id]?.hasFile || false;
+          await idbPut('meta', { ...book, hasFile: keepsFile });
+        }
+        await loadLibrary();
+        toast('Backup imported');
+      }
+    );
+  }catch(err){
+    console.error('import backup failed', err);
+    toast('Import failed: ' + err.message);
+  }
+});
 
 /* ============ PWA: install prompt + service worker ============ */
 let deferredInstallPrompt = null;
