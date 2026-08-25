@@ -33,6 +33,12 @@
   .ring text{ fill:var(--paper); }
   .ring .ring-track{ stroke:var(--line); }
   *{box-sizing:border-box;}
+  button:focus-visible, [tabindex]:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible{
+    outline:2px solid var(--signal); outline-offset:2px; border-radius:4px;
+  }
+  .card:focus-visible, .swatch:focus-visible, .tool-swatch:focus-visible{
+    outline:2px solid var(--signal); outline-offset:2px;
+  }
   html,body{height:100%;}
   body{ margin:0; background:var(--ink); color:var(--paper); font-family:'Inter',sans-serif;
     -webkit-font-smoothing:antialiased; overflow:hidden; }
@@ -86,6 +92,12 @@
 
   .shelf-label{ font-size:12px; text-transform:uppercase; letter-spacing:1.4px; color:var(--muted); margin:0 0 16px; }
   .shelf-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:10px; }
+  .stats-strip{ display:flex; gap:10px; margin-bottom:28px; flex-wrap:wrap; }
+  .stat-chip{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 18px;
+    display:flex; align-items:center; gap:10px; min-width:120px; }
+  .stat-chip .stat-icon{ font-size:20px; }
+  .stat-chip .stat-value{ font-family:'IBM Plex Mono',monospace; font-size:18px; font-weight:600; color:var(--paper); line-height:1.1; }
+  .stat-chip .stat-label{ font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
   .shelf-controls{ display:flex; gap:8px; }
   .shelf-controls input{ background:var(--panel2); border:1px solid var(--line); color:var(--paper);
     padding:8px 12px; border-radius:8px; font-size:13px; width:200px; }
@@ -589,7 +601,7 @@
     <div class="topbar">
       <div class="brand"><div class="brand-mark"></div><div class="brand-name">Book Tracker</div></div>
       <div class="topbar-right">
-        <div class="version-badge mono" id="versionBadge">v1.8.0</div>
+        <div class="version-badge mono" id="versionBadge">v1.9.0</div>
         <div id="googleSignInContainer"></div>
         <button class="google-btn" id="googleBtnFallback" style="display:none;">
           <span>Sign in with Google</span>
@@ -613,6 +625,7 @@
           <button class="ghost-btn" id="installBtn" style="display:none;"><span>⬇</span> Install app</button>
         </div>
       </div>
+      <div class="stats-strip" id="statsStrip" style="display:none;"></div>
       <div class="shelf-row">
         <div class="shelf-label" style="margin:0;">Your shelf</div>
         <div class="shelf-controls">
@@ -633,22 +646,23 @@
     <div class="progress-rail"><div class="progress-fill" id="progressFill"></div></div>
     <div class="reader-topbar">
       <div class="reader-left">
-        <button class="icon-btn" id="backBtn" title="Back to library">←</button>
+        <button class="icon-btn" id="backBtn" title="Back to library" aria-label="Back to library">←</button>
         <div class="reader-title" id="readerTitle">Untitled</div>
       </div>
       <div class="reader-right">
         <span class="pct-tag mono" id="pctTag">0%</span>
-        <button class="icon-btn" id="findToggle" title="Find in book">🔍</button>
-        <button class="icon-btn" id="sidebarToggle" title="Pages & outline" style="display:none;">☰</button>
-        <button class="icon-btn" id="listenToggle" title="Listen" style="display:none;">🔊</button>
-        <button class="icon-btn" id="readerSettingsToggle" title="Reading settings" style="display:none;">Aa</button>
-        <button class="icon-btn" id="notesToggle" title="Notes & highlights">🗒</button>
-        <button class="icon-btn" id="whiteboardToggle" title="Whiteboard">🖍</button>
-        <button class="icon-btn" id="themeToggleReader" title="Toggle light/dark mode">🌙</button>
-        <button class="icon-btn" id="moreToggle" title="More">⋯</button>
+        <button class="icon-btn" id="findToggle" title="Find in book" aria-label="Find in book">🔍</button>
+        <button class="icon-btn" id="sidebarToggle" title="Pages & outline" aria-label="Pages and outline" style="display:none;">☰</button>
+        <button class="icon-btn" id="listenToggle" title="Listen" aria-label="Listen — text to speech" style="display:none;">🔊</button>
+        <button class="icon-btn" id="readerSettingsToggle" title="Reading settings" aria-label="Reading settings" style="display:none;">Aa</button>
+        <button class="icon-btn" id="notesToggle" title="Notes & highlights" aria-label="Notes and highlights">🗒</button>
+        <button class="icon-btn" id="whiteboardToggle" title="Whiteboard" aria-label="Open whiteboard">🖍</button>
+        <button class="icon-btn" id="themeToggleReader" title="Toggle light/dark mode" aria-label="Toggle light or dark mode">🌙</button>
+        <button class="icon-btn" id="moreToggle" title="More" aria-label="More options">⋯</button>
       </div>
     </div>
     <div class="more-menu" id="moreMenu">
+      <button id="menuRename">✎ Rename book</button>
       <button id="menuDownload">⬇ Download original file</button>
       <button id="menuPrint" style="display:none;">🖨 Print</button>
       <button id="menuConvertPdf" style="display:none;">⇩ Convert to PDF</button>
@@ -924,6 +938,20 @@
     </div>
   </div>
 
+  <!-- PROMPT MODAL (reusable — text input) -->
+  <div class="modal-overlay" id="promptOverlay">
+    <div class="modal">
+      <h2 id="promptTitle">Rename</h2>
+      <div class="field">
+        <input type="text" id="promptInput" style="width:100%;">
+      </div>
+      <div class="modal-actions" style="justify-content:flex-end; gap:10px;">
+        <button class="ghost-btn" id="promptCancel" style="padding:9px 16px; font-size:13px;">Cancel</button>
+        <button class="modal-close" id="promptOk">Save</button>
+      </div>
+    </div>
+  </div>
+
   <!-- CONFIRM MODAL (reusable) -->
   <div class="modal-overlay" id="confirmOverlay">
     <div class="modal">
@@ -1100,6 +1128,41 @@ function showConfirm(title, body, onConfirm){
   okBtn.addEventListener('click', onOk);
   cancelBtn.addEventListener('click', onCancel);
 }
+function showPrompt(title, initialValue, onSave){
+  document.getElementById('promptTitle').textContent = title;
+  const input = document.getElementById('promptInput');
+  input.value = initialValue || '';
+  document.getElementById('promptOverlay').classList.add('show');
+  setTimeout(()=>{ input.focus(); input.select(); }, 30);
+  const okBtn = document.getElementById('promptOk');
+  const cancelBtn = document.getElementById('promptCancel');
+  const cleanup = ()=>{
+    document.getElementById('promptOverlay').classList.remove('show');
+    okBtn.removeEventListener('click', onOk);
+    cancelBtn.removeEventListener('click', onCancel);
+    input.removeEventListener('keydown', onKey);
+  };
+  function onOk(){ const v = input.value.trim(); cleanup(); if(v) onSave(v); }
+  function onCancel(){ cleanup(); }
+  function onKey(e){ if(e.key==='Enter') onOk(); if(e.key==='Escape') onCancel(); }
+  okBtn.addEventListener('click', onOk);
+  cancelBtn.addEventListener('click', onCancel);
+  input.addEventListener('keydown', onKey);
+}
+function renameBook(id){
+  const meta = library[id];
+  if(!meta) return;
+  showPrompt('Rename book', meta.title, async (newTitle)=>{
+    meta.title = newTitle;
+    await idbPut('meta', meta);
+    renderLibrary();
+    if(current && current.id===id){
+      current.title = newTitle;
+      document.getElementById('readerTitle').textContent = newTitle;
+    }
+    toast('Renamed');
+  });
+}
 function fmtDate(ts){ return new Date(ts).toLocaleDateString(undefined,{month:'short',day:'numeric'}); }
 async function fileHashId(file){
   const raw = file.name + '_' + file.size + '_' + (file.lastModified||0);
@@ -1150,7 +1213,32 @@ async function loadLibrary(){
 }
 document.getElementById('librarySearch').addEventListener('input', renderLibrary);
 document.getElementById('librarySort').addEventListener('change', renderLibrary);
+function localDateKey(ts){
+  const d = new Date(ts);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function renderStatsStrip(){
+  const strip = document.getElementById('statsStrip');
+  const books = Object.values(library);
+  if(books.length===0){ strip.style.display='none'; return; }
+  const total = books.length;
+  const finished = books.filter(b=>(b.progress||0)>=95).length;
+  const dateSet = new Set(books.map(b=>b.lastOpened).filter(Boolean).map(localDateKey));
+  const oneDay = 86400000;
+  let streak = 0;
+  let cursor = new Date(); cursor.setHours(0,0,0,0);
+  if(!dateSet.has(localDateKey(cursor.getTime()))) cursor = new Date(cursor.getTime()-oneDay);
+  while(dateSet.has(localDateKey(cursor.getTime()))){ streak++; cursor = new Date(cursor.getTime()-oneDay); }
+
+  strip.style.display = 'flex';
+  strip.innerHTML = `
+    <div class="stat-chip"><span class="stat-icon">🔥</span><div><div class="stat-value">${streak}</div><div class="stat-label">Day streak</div></div></div>
+    <div class="stat-chip"><span class="stat-icon">📚</span><div><div class="stat-value">${total}</div><div class="stat-label">Books</div></div></div>
+    <div class="stat-chip"><span class="stat-icon">✅</span><div><div class="stat-value">${finished}</div><div class="stat-label">Finished</div></div></div>
+  `;
+}
 function renderLibrary(){
+  renderStatsStrip();
   const grid = document.getElementById('grid');
   const query = (document.getElementById('librarySearch').value||'').trim().toLowerCase();
   const sortMode = document.getElementById('librarySort').value;
@@ -1173,6 +1261,9 @@ function renderLibrary(){
     const pct = Math.round(meta.progress||0);
     const card = document.createElement('div');
     card.className = 'card';
+    card.tabIndex = 0;
+    card.setAttribute('role','button');
+    card.setAttribute('aria-label', `Open ${meta.title}`);
     card.innerHTML = `
       <div class="card-spine" style="background:${spineColorFor(meta.id)}"></div>
       <div class="card-body">
@@ -1186,6 +1277,7 @@ function renderLibrary(){
                 stroke-linecap="round" transform="rotate(-90 18 18)"/>
               <text x="18" y="21" text-anchor="middle" font-size="10" font-family="IBM Plex Mono">${pct}%</text>
             </svg>
+            <button class="card-delete" data-rename-id="${meta.id}" title="Rename" style="margin-right:2px;">✎</button>
             <button class="card-delete" data-delete-id="${meta.id}" title="Remove from shelf">🗑</button>
           </div>
         </div>
@@ -1193,13 +1285,18 @@ function renderLibrary(){
         <div class="card-meta">Last opened ${fmtDate(meta.lastOpened)}</div>
       </div>`;
     card.addEventListener('click', (e)=>{
-      if(e.target.closest('[data-delete-id]')) return;
+      if(e.target.closest('[data-delete-id]') || e.target.closest('[data-rename-id]')) return;
       reopenBook(meta.id);
+    });
+    card.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter' || e.key===' '){ e.preventDefault(); reopenBook(meta.id); }
     });
     grid.appendChild(card);
   });
 }
 document.getElementById('grid').addEventListener('click', (e)=>{
+  const renameBtn = e.target.closest('[data-rename-id]');
+  if(renameBtn){ e.stopPropagation(); renameBook(renameBtn.dataset.renameId); return; }
   const btn = e.target.closest('[data-delete-id]');
   if(!btn) return;
   e.stopPropagation();
@@ -1763,6 +1860,10 @@ document.addEventListener('click', (e)=>{
   if(!e.target.closest('#moreMenu') && !e.target.closest('#moreToggle')){
     document.getElementById('moreMenu').classList.remove('show');
   }
+});
+document.getElementById('menuRename').addEventListener('click', ()=>{
+  document.getElementById('moreMenu').classList.remove('show');
+  renameBook(current.id);
 });
 document.getElementById('menuDownload').addEventListener('click', ()=>{
   if(!currentFileBlob){ toast('Nothing to download.'); return; }
