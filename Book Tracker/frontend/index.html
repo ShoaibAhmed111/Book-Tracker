@@ -125,8 +125,14 @@
 
   /* ---------- READER ---------- */
   #reader{ flex-direction:column; background:var(--ink); }
-  .progress-rail{ height:3px; background:var(--line); flex-shrink:0; }
+  .progress-rail{ height:5px; background:var(--line); flex-shrink:0; position:relative; }
   .progress-fill{ height:100%; background:linear-gradient(90deg,var(--signal),var(--violet)); width:0%; transition:width .25s; }
+  .scroll-position-marker{ position:absolute; top:-2px; width:3px; height:9px; background:var(--amber);
+    border-radius:2px; left:0%; transform:translateX(-50%); transition:left .15s linear;
+    box-shadow:0 0 4px rgba(255,176,32,.7); z-index:2; }
+  .scroll-position-marker::after{ content:''; position:absolute; top:-4px; left:50%; transform:translateX(-50%);
+    width:0; height:0; border-left:4px solid transparent; border-right:4px solid transparent;
+    border-top:4px solid var(--amber); }
   .reader-topbar{ display:flex; align-items:center; justify-content:space-between; padding:14px 22px;
     border-bottom:1px solid var(--line); flex-shrink:0; }
   .reader-left{ display:flex; align-items:center; gap:14px; min-width:0; }
@@ -174,6 +180,32 @@
   .eraser-tool mark[data-hl-id]{ cursor:cell; }
   .eraser-tool mark[data-hl-id]:hover{ filter:brightness(.7) saturate(1.4); }
   .ann-mode-btn.on{ background:var(--panel2); box-shadow:inset 0 0 0 1px var(--signal); }
+
+  .insert-panel{ position:absolute; left:50%; bottom:80px; transform:translateX(-50%); width:320px;
+    max-width:92vw; background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    box-shadow:0 14px 40px rgba(0,0,0,.45); z-index:20; display:none; overflow:hidden; }
+  .insert-panel.show{ display:block; }
+  .insert-panel-body{ padding:12px; }
+  .insert-search{ width:100%; background:var(--panel2); border:1px solid var(--line); color:var(--paper);
+    padding:8px 12px; border-radius:8px; font-size:13px; margin-bottom:10px; }
+  .emoji-cats{ display:flex; gap:4px; margin-bottom:8px; overflow-x:auto; }
+  .emoji-cats button{ background:transparent; border:none; font-size:16px; padding:4px 8px; border-radius:6px;
+    cursor:pointer; flex-shrink:0; }
+  .emoji-cats button.on{ background:var(--panel2); }
+  .emoji-grid{ display:grid; grid-template-columns:repeat(8,1fr); gap:2px; max-height:200px; overflow-y:auto; }
+  .emoji-grid button{ background:transparent; border:none; font-size:20px; padding:6px 0; border-radius:6px;
+    cursor:pointer; }
+  .emoji-grid button:hover{ background:var(--panel2); }
+  .gif-grid{ display:grid; grid-template-columns:1fr 1fr; gap:6px; max-height:280px; overflow-y:auto; }
+  .gif-grid img{ width:100%; border-radius:8px; cursor:pointer; display:block; transition:transform .12s; }
+  .gif-grid img:hover{ transform:scale(1.03); }
+  .gif-hint{ color:var(--muted); font-size:12px; text-align:center; padding:20px 10px; }
+  .insert-panel-armed{ background:rgba(51,230,176,.1); border-top:1px solid var(--line); padding:9px 12px;
+    font-size:12px; color:var(--paper); display:flex; align-items:center; gap:8px; }
+  .insert-panel-armed #insertArmedPreview{ font-size:18px; }
+  .insert-panel-armed button{ margin-left:auto; background:var(--panel2); border:1px solid var(--line);
+    color:var(--paper); font-size:11px; padding:4px 9px; border-radius:6px; cursor:pointer; }
+  .stamp-marker.gif-marker{ width:80px; border-radius:6px; vertical-align:middle; }
 
   @keyframes bookmarkBob{ 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-2px); } }
   .bookmark-marker{
@@ -601,7 +633,7 @@
     <div class="topbar">
       <div class="brand"><div class="brand-mark"></div><div class="brand-name">Book Tracker</div></div>
       <div class="topbar-right">
-        <div class="version-badge mono" id="versionBadge">v1.9.0</div>
+        <div class="version-badge mono" id="versionBadge">v2.0.0</div>
         <div id="googleSignInContainer"></div>
         <button class="google-btn" id="googleBtnFallback" style="display:none;">
           <span>Sign in with Google</span>
@@ -643,7 +675,10 @@
 
   <!-- READER -->
   <div id="reader" class="screen">
-    <div class="progress-rail"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="progress-rail" title="Filled bar = your bookmarked completion. Amber marker = where you're currently scrolled.">
+      <div class="progress-fill" id="progressFill"></div>
+      <div class="scroll-position-marker" id="scrollMarker"></div>
+    </div>
     <div class="reader-topbar">
       <div class="reader-left">
         <button class="icon-btn" id="backBtn" title="Back to library" aria-label="Back to library">←</button>
@@ -806,16 +841,14 @@
         <div class="toolbar">
           <button class="tb-btn on" id="toolSelect" title="Select text normally (V)">🖱 Select</button>
           <button class="tb-btn" id="toolHighlight" title="Highlight tool (H)">🖊 Highlight</button>
-          <button class="tb-btn" id="toolAnnotate" title="Annotate — comment or stamp (A)">🗨 Annotate</button>
+          <button class="tb-btn" id="toolAnnotate" title="Insert — text, emoji, or GIF (A)">😀 Insert</button>
           <button class="tb-btn" id="toolBookmark" title="Bookmark — mark your reading spot (B)">🔖 Bookmark</button>
           <button class="tb-btn" id="toolEraser" title="Eraser — drag to erase (E)">🧹 Eraser</button>
           <button class="tb-btn" id="toolNote" title="Add a note (N)">＋ Note</button>
           <div class="toolbar-sep" id="annotateSep" style="display:none;"></div>
-          <button class="tb-btn ann-mode-btn on" id="annModeComment" data-mode="comment" style="display:none;" title="Comment on a passage">💬</button>
-          <button class="tb-btn ann-mode-btn" id="annStampStar" data-mode="stamp" data-icon="⭐" style="display:none;" title="Stamp: star">⭐</button>
-          <button class="tb-btn ann-mode-btn" id="annStampCheck" data-mode="stamp" data-icon="✅" style="display:none;" title="Stamp: check">✅</button>
-          <button class="tb-btn ann-mode-btn" id="annStampX" data-mode="stamp" data-icon="❌" style="display:none;" title="Stamp: cross">❌</button>
-          <button class="tb-btn ann-mode-btn" id="annStampFlag" data-mode="stamp" data-icon="❗" style="display:none;" title="Stamp: important">❗</button>
+          <button class="tb-btn ann-mode-btn on" id="annModeComment" data-mode="comment" style="display:none;" title="Text — comment on a passage">💬 Text</button>
+          <button class="tb-btn ann-mode-btn" id="annModeEmoji" data-mode="emoji" style="display:none;" title="Emoji &amp; stickers">😀 Emoji</button>
+          <button class="tb-btn ann-mode-btn" id="annModeGif" data-mode="gif" style="display:none;" title="GIF search">🎞 GIF</button>
           <button class="tb-btn ann-mode-btn" id="annModeDraw" data-mode="draw" style="display:none;" title="Freehand ink (PDF pages only)">✏️ Draw</button>
           <div class="toolbar-sep" id="toolSwatchSep" style="display:none;"></div>
           <div class="swatch sw-mint active tool-swatch" data-hcolor="mint" style="display:none;" title="Mint"></div>
@@ -824,6 +857,23 @@
           <div class="toolbar-sep"></div>
           <button class="tb-btn" id="fontMinus">A−</button>
           <button class="tb-btn" id="fontPlus">A+</button>
+        </div>
+
+        <div class="insert-panel" id="insertPanel">
+          <div class="insert-panel-body" id="emojiPanel">
+            <input type="text" id="emojiSearch" placeholder="Search emoji…" class="insert-search">
+            <div class="emoji-cats" id="emojiCats"></div>
+            <div class="emoji-grid" id="emojiGrid"></div>
+          </div>
+          <div class="insert-panel-body" id="gifPanel" style="display:none;">
+            <input type="text" id="gifSearch" placeholder="Search GIFs…" class="insert-search">
+            <div class="gif-grid" id="gifGrid"></div>
+            <div class="gif-hint" id="gifHint" style="display:none;">Add a free GIPHY API key in Settings (⚙) to search GIFs.</div>
+          </div>
+          <div class="insert-panel-armed" id="insertArmed" style="display:none;">
+            <span id="insertArmedPreview"></span> selected — click anywhere in the text to place it
+            <button id="insertArmedCancel">Cancel</button>
+          </div>
         </div>
       </div>
 
@@ -873,6 +923,14 @@
           → Create Credentials → OAuth client ID → Web application → add
           <code style="background:var(--panel);padding:1px 4px;border-radius:4px;">http://localhost:5500</code>
           under Authorized JavaScript origins → copy the Client ID here.
+        </div>
+      </div>
+      <div class="field">
+        <label>GIPHY API key (for GIF search in Insert tool)</label>
+        <input type="text" id="giphyKeyInput" placeholder="your GIPHY API key">
+        <div class="hint">Free, ~2 minutes: go to
+          <a href="https://developers.giphy.com/dashboard/" target="_blank" style="color:var(--signal);">developers.giphy.com/dashboard</a>
+          → Create an app → choose "API" → copy the key here.
         </div>
       </div>
       <div class="field">
@@ -1061,13 +1119,14 @@ async function idbDelete(store, key){
 }
 
 /* ============ SETTINGS ============ */
-let settings = { backendUrl:'', targetLang:'es', readerTheme:'dark', readerFont:'sans', readerLineHeight:1.75, readerFontSize:null, appTheme:'dark', googleClientId:'', user:null };
+let settings = { backendUrl:'', targetLang:'es', readerTheme:'dark', readerFont:'sans', readerLineHeight:1.75, readerFontSize:null, appTheme:'dark', googleClientId:'', user:null, giphyKey:'' };
 async function loadSettings(){
   const s = await idbGet('settings','app');
   if(s) settings = {...settings, ...s.value};
   document.getElementById('backendUrlInput').value = settings.backendUrl || '';
   document.getElementById('targetLangInput').value = settings.targetLang || 'es';
   document.getElementById('googleClientIdInput').value = settings.googleClientId || '';
+  document.getElementById('giphyKeyInput').value = settings.giphyKey || '';
   applyAppTheme();
   applyUserProfileUI();
   initGoogleSignIn();
@@ -1101,6 +1160,7 @@ async function saveSettings(){
   const newClientId = document.getElementById('googleClientIdInput').value.trim();
   const clientIdChanged = newClientId !== (settings.googleClientId||'');
   settings.googleClientId = newClientId;
+  settings.giphyKey = document.getElementById('giphyKeyInput').value.trim();
   await idbPut('settings', {key:'app', value:settings});
   if(clientIdChanged) initGoogleSignIn();
 }
@@ -1201,7 +1261,7 @@ let activeToolColor = 'mint'; // 'mint' | 'violet' | 'amber'
 let tool = 'select'; // 'select' | 'highlight' | 'annotate' | 'bookmark' | 'eraser' | 'note'
 let currentIsPdf = false;
 let annotateMode = 'comment'; // 'comment' | 'stamp'
-let stampIcon = '⭐';
+let armedInsert = null; // {kind:'emoji'|'gif', content} — what's currently selected to place next
 let pendingNoteAnchor = null;
 
 /* ============ LIBRARY ============ */
@@ -1411,6 +1471,7 @@ async function openBook(meta, file){
   document.getElementById('selPopover').classList.remove('show');
   document.getElementById('coverArtOverlay').classList.remove('show');
   document.getElementById('wbOverlay').classList.remove('show');
+  armedInsert = null;
   setTool('select');
   stopTTS();
   screen('reader');
@@ -1612,13 +1673,15 @@ async function loadXlsx(file){
 function attachTextTracking(scrollEl, inner){
   let t;
   scrollEl.onscroll = ()=>{
+    updateScrollMarker(scrollEl.scrollHeight>scrollEl.clientHeight ? (scrollEl.scrollTop/(scrollEl.scrollHeight-scrollEl.clientHeight))*100 : 0);
     clearTimeout(t);
     t = setTimeout(()=>{
       const max = scrollEl.scrollHeight - scrollEl.clientHeight;
       current.scrollRatio = max>0 ? scrollEl.scrollTop/max : 0;
       // Once a bookmark exists, it's the deliberate source of truth for
       // "how far read" — passive scrolling (including scrolling ahead to
-      // peek) no longer moves the displayed progress.
+      // peek) no longer moves the displayed completion. The amber marker
+      // above still tracks live scroll position regardless.
       if(!current.bookmark){
         current.progress = Math.min(100, Math.round(current.scrollRatio*100));
         updateProgressUI();
@@ -1787,12 +1850,17 @@ function updatePdfProgress(num){
   document.getElementById('prevPage').disabled = num<=1;
   document.getElementById('nextPage').disabled = num>=total;
   current.currentPage = num;
+  updateScrollMarker(total===1 ? 100 : ((num-1)/(total-1))*100);
   if(!current.bookmark){
     current.progress = total===1 ? 100 : Math.round(((num-1)/(total-1))*100);
     updateProgressUI();
   }
   clearTimeout(updatePdfProgress._t);
   updatePdfProgress._t = setTimeout(saveMeta, 300);
+}
+function updateScrollMarker(pct){
+  const marker = document.getElementById('scrollMarker');
+  if(marker) marker.style.left = Math.max(0,Math.min(100,pct))+'%';
 }
 function changeZoom(delta){
   currentDoc.fitWidth = false; currentDoc.fitPage = false;
@@ -2238,6 +2306,13 @@ function updateProgressUI(){
   const pct = Math.max(0, Math.min(100, Math.round(current.progress||0)));
   document.getElementById('progressFill').style.width = pct+'%';
   document.getElementById('pctTag').textContent = pct+'%';
+  if(currentDoc && currentDoc.type==='pdf' && currentDoc.pdf){
+    const total = currentDoc.pdf.numPages;
+    const num = current.currentPage||1;
+    updateScrollMarker(total<=1 ? 100 : ((num-1)/(total-1))*100);
+  } else if(current.scrollRatio!==undefined){
+    updateScrollMarker((current.scrollRatio||0)*100);
+  }
 }
 async function saveMeta(){
   library[current.id] = current;
@@ -2280,6 +2355,11 @@ function setTool(next){
     stage.classList.toggle('draw-active', next==='annotate' && annotateMode==='draw');
   }
   document.getElementById('textView').classList.toggle('eraser-tool', next==='eraser');
+  if(next!=='annotate'){
+    document.getElementById('insertPanel').classList.remove('show');
+  } else if(annotateMode==='emoji' || annotateMode==='gif'){
+    document.getElementById('insertPanel').classList.add('show');
+  }
   if(next!=='eraser'){
     document.getElementById('eraserCursor').classList.remove('active');
     document.body.classList.remove('eraser-cursor-on','erasing-drag');
@@ -2294,14 +2374,46 @@ document.querySelectorAll('.ann-mode-btn').forEach(btn=>{
     document.querySelectorAll('.ann-mode-btn').forEach(b=>b.classList.remove('on'));
     btn.classList.add('on');
     annotateMode = btn.dataset.mode;
-    if(annotateMode==='stamp') stampIcon = btn.dataset.icon;
+    armedInsert = null;
+    updateInsertArmedBanner();
     const showSwatches = (annotateMode==='comment' || annotateMode==='draw');
     document.getElementById('toolSwatchSep').style.display = showSwatches ? 'block' : 'none';
     document.querySelectorAll('.tool-swatch').forEach(sw=> sw.style.display = showSwatches ? 'inline-block' : 'none');
     const stage = document.getElementById('pdfView');
     if(stage) stage.classList.toggle('draw-active', annotateMode==='draw');
+
+    const panel = document.getElementById('insertPanel');
+    if(annotateMode==='emoji'){
+      panel.classList.add('show');
+      document.getElementById('emojiPanel').style.display = 'block';
+      document.getElementById('gifPanel').style.display = 'none';
+      if(!emojiGridBuilt) buildEmojiGrid();
+    } else if(annotateMode==='gif'){
+      panel.classList.add('show');
+      document.getElementById('emojiPanel').style.display = 'none';
+      document.getElementById('gifPanel').style.display = 'block';
+      updateGifHintVisibility();
+    } else {
+      panel.classList.remove('show');
+    }
   });
 });
+function updateInsertArmedBanner(){
+  const bar = document.getElementById('insertArmed');
+  if(armedInsert){
+    bar.style.display = 'flex';
+    document.getElementById('insertArmedPreview').innerHTML = armedInsert.kind==='gif'
+      ? `<img src="${armedInsert.content}" style="width:36px;border-radius:4px;vertical-align:middle;">`
+      : armedInsert.content;
+  } else {
+    bar.style.display = 'none';
+  }
+}
+document.getElementById('insertArmedCancel').addEventListener('click', ()=>{
+  armedInsert = null;
+  updateInsertArmedBanner();
+});
+
 document.getElementById('fontPlus').addEventListener('click', ()=> adjustFontOrZoom(1));
 document.getElementById('fontMinus').addEventListener('click', ()=> adjustFontOrZoom(-1));
 function adjustFontOrZoom(dir){
@@ -2359,7 +2471,7 @@ function attachSelectionHandlers(container, pdfPage){
       // Tools that act on a single click (no drag) rather than a selection.
       if(sel.isCollapsed){
         if(tool==='bookmark'){ placeBookmark(range, container, pdfPage); }
-        else if(tool==='annotate' && annotateMode==='stamp'){ placeStamp(range, container, pdfPage); }
+        else if(tool==='annotate' && (annotateMode==='emoji'||annotateMode==='gif') && armedInsert){ placeStamp(range, container, pdfPage); }
         return;
       }
 
@@ -2420,30 +2532,40 @@ function startAnnotation(range, container, pdfPage){
 }
 
 /* ---------- Stamp placement (Zoom-style quick icon annotation) ---------- */
+function buildStampNode(record){
+  if(record.kind==='gif'){
+    const img = document.createElement('img');
+    img.className = 'stamp-marker gif-marker';
+    img.src = record.icon;
+    img.dataset.stampId = record.id;
+    img.title = 'Click to remove';
+    return img;
+  }
+  const span = document.createElement('span');
+  span.className = 'stamp-marker';
+  span.textContent = record.icon;
+  span.dataset.stampId = record.id;
+  span.title = 'Click to remove';
+  return span;
+}
 function placeStamp(range, container, pdfPage){
+  if(!armedInsert) return;
   const offset = textOffsetOf(container, range.startContainer, range.startOffset);
-  const icon = document.createElement('span');
-  icon.className = 'stamp-marker';
-  icon.textContent = stampIcon;
-  icon.dataset.stampId = 's'+Date.now();
-  icon.title = 'Click to remove';
-  try{ range.insertNode(icon); }catch(e){ return; }
+  const record = { id:'s'+Date.now(), kind:armedInsert.kind, icon:armedInsert.content, start:offset, page:pdfPage||null, created:Date.now() };
+  const node = buildStampNode(record);
+  try{ range.insertNode(node); }catch(e){ return; }
   current.stamps = current.stamps||[];
-  current.stamps.push({ id: icon.dataset.stampId, icon: stampIcon, start: offset, page: pdfPage||null, created: Date.now() });
+  current.stamps.push(record);
   saveMeta(); renderDrawer();
-  icon.classList.add('hl-flash');
-  icon.addEventListener('animationend', ()=>icon.classList.remove('hl-flash'), {once:true});
+  node.classList.add('hl-flash');
+  node.addEventListener('animationend', ()=>node.classList.remove('hl-flash'), {once:true});
 }
 function reapplyStamps(container, pdfPageNum){
   (current.stamps||[]).filter(s => (s.page||null) === (pdfPageNum||null)).forEach(s=>{
     const r = buildRangeFromOffsets(container, s.start, s.start);
     if(!r) return;
-    const icon = document.createElement('span');
-    icon.className = 'stamp-marker';
-    icon.textContent = s.icon;
-    icon.dataset.stampId = s.id;
-    icon.title = 'Click to remove';
-    try{ r.insertNode(icon); }catch(e){}
+    const node = buildStampNode(s.kind ? s : {...s, kind:'emoji'}); // old records predate the kind field — default to emoji
+    try{ r.insertNode(node); }catch(e){}
   });
 }
 document.addEventListener('click', (e)=>{
@@ -2680,6 +2802,115 @@ function flashEraserCursor(){
   cur.classList.add('erasing');
   clearTimeout(flashEraserCursor._t);
   flashEraserCursor._t = setTimeout(()=>cur.classList.remove('erasing'), 150);
+}
+
+/* ---------- Gboard-style Emoji picker ---------- */
+const EMOJI_CATEGORIES = [
+  {id:'smileys', icon:'😀', label:'Smileys'},
+  {id:'gestures', icon:'👍', label:'Gestures'},
+  {id:'hearts', icon:'❤️', label:'Hearts'},
+  {id:'animals', icon:'🐶', label:'Animals'},
+  {id:'food', icon:'🍕', label:'Food'},
+  {id:'objects', icon:'💡', label:'Objects'},
+  {id:'symbols', icon:'⭐', label:'Symbols'},
+];
+const EMOJI_LIST = [
+  {e:'😀',cat:'smileys',kw:'grin happy'}, {e:'😂',cat:'smileys',kw:'laugh tears joy'}, {e:'🥰',cat:'smileys',kw:'love smile hearts'},
+  {e:'😍',cat:'smileys',kw:'heart eyes love'}, {e:'🤔',cat:'smileys',kw:'thinking hmm'}, {e:'😅',cat:'smileys',kw:'sweat nervous laugh'},
+  {e:'😭',cat:'smileys',kw:'cry sob sad'}, {e:'😴',cat:'smileys',kw:'sleep tired zzz'}, {e:'🤯',cat:'smileys',kw:'mind blown shock'},
+  {e:'😎',cat:'smileys',kw:'cool sunglasses'}, {e:'🥳',cat:'smileys',kw:'party celebrate'}, {e:'😡',cat:'smileys',kw:'angry mad'},
+  {e:'😱',cat:'smileys',kw:'scream shock scared'}, {e:'🙄',cat:'smileys',kw:'eyeroll annoyed'}, {e:'😬',cat:'smileys',kw:'grimace awkward'},
+  {e:'🤗',cat:'smileys',kw:'hug'}, {e:'😏',cat:'smileys',kw:'smirk'}, {e:'🥺',cat:'smileys',kw:'pleading puppy eyes'},
+  {e:'😇',cat:'smileys',kw:'angel innocent halo'}, {e:'🤓',cat:'smileys',kw:'nerd glasses'},
+  {e:'👍',cat:'gestures',kw:'thumbs up good yes'}, {e:'👎',cat:'gestures',kw:'thumbs down bad no'}, {e:'👏',cat:'gestures',kw:'clap applause'},
+  {e:'🙌',cat:'gestures',kw:'praise hands up'}, {e:'✍️',cat:'gestures',kw:'writing hand'}, {e:'🤝',cat:'gestures',kw:'handshake deal'},
+  {e:'👉',cat:'gestures',kw:'point right'}, {e:'👆',cat:'gestures',kw:'point up'}, {e:'✋',cat:'gestures',kw:'stop hand raised'},
+  {e:'🤞',cat:'gestures',kw:'fingers crossed luck'}, {e:'💪',cat:'gestures',kw:'strong muscle flex'}, {e:'🙏',cat:'gestures',kw:'pray thanks please'},
+  {e:'👌',cat:'gestures',kw:'ok perfect'}, {e:'✌️',cat:'gestures',kw:'peace victory'}, {e:'🤦',cat:'gestures',kw:'facepalm'},
+  {e:'❤️',cat:'hearts',kw:'love heart red'}, {e:'💔',cat:'hearts',kw:'broken heart sad'}, {e:'💛',cat:'hearts',kw:'yellow heart'},
+  {e:'💚',cat:'hearts',kw:'green heart'}, {e:'💙',cat:'hearts',kw:'blue heart'}, {e:'💜',cat:'hearts',kw:'purple heart'},
+  {e:'🧡',cat:'hearts',kw:'orange heart'}, {e:'🖤',cat:'hearts',kw:'black heart'}, {e:'💕',cat:'hearts',kw:'two hearts love'},
+  {e:'💖',cat:'hearts',kw:'sparkle heart'}, {e:'💯',cat:'hearts',kw:'hundred perfect'},
+  {e:'🐶',cat:'animals',kw:'dog puppy'}, {e:'🐱',cat:'animals',kw:'cat kitten'}, {e:'🦊',cat:'animals',kw:'fox'},
+  {e:'🐼',cat:'animals',kw:'panda'}, {e:'🦁',cat:'animals',kw:'lion'}, {e:'🐸',cat:'animals',kw:'frog'},
+  {e:'🐢',cat:'animals',kw:'turtle slow'}, {e:'🦉',cat:'animals',kw:'owl wise'}, {e:'🐝',cat:'animals',kw:'bee'},
+  {e:'🦋',cat:'animals',kw:'butterfly'}, {e:'🐧',cat:'animals',kw:'penguin'}, {e:'🦄',cat:'animals',kw:'unicorn magic'},
+  {e:'🍕',cat:'food',kw:'pizza'}, {e:'🍔',cat:'food',kw:'burger'}, {e:'🍟',cat:'food',kw:'fries'},
+  {e:'🍩',cat:'food',kw:'donut'}, {e:'☕',cat:'food',kw:'coffee'}, {e:'🍎',cat:'food',kw:'apple fruit'},
+  {e:'🍫',cat:'food',kw:'chocolate'}, {e:'🍰',cat:'food',kw:'cake'}, {e:'🍿',cat:'food',kw:'popcorn'},
+  {e:'🍜',cat:'food',kw:'noodles ramen'}, {e:'🥤',cat:'food',kw:'drink soda'}, {e:'🍺',cat:'food',kw:'beer'},
+  {e:'💡',cat:'objects',kw:'idea lightbulb'}, {e:'📌',cat:'objects',kw:'pin important'}, {e:'📝',cat:'objects',kw:'note memo'},
+  {e:'🔑',cat:'objects',kw:'key'}, {e:'🔥',cat:'objects',kw:'fire hot lit'}, {e:'💰',cat:'objects',kw:'money bag'},
+  {e:'📚',cat:'objects',kw:'books study'}, {e:'⏰',cat:'objects',kw:'alarm clock time'}, {e:'🎯',cat:'objects',kw:'target goal bullseye'},
+  {e:'🚀',cat:'objects',kw:'rocket launch fast'}, {e:'🎉',cat:'objects',kw:'party confetti celebrate'}, {e:'💎',cat:'objects',kw:'diamond gem'},
+  {e:'⭐',cat:'symbols',kw:'star favorite'}, {e:'✅',cat:'symbols',kw:'check done correct'}, {e:'❌',cat:'symbols',kw:'cross wrong no'},
+  {e:'❗',cat:'symbols',kw:'exclamation important warning'}, {e:'❓',cat:'symbols',kw:'question confused'}, {e:'⚠️',cat:'symbols',kw:'warning caution'},
+  {e:'♾️',cat:'symbols',kw:'infinity forever'}, {e:'🔴',cat:'symbols',kw:'red circle dot'}, {e:'🟢',cat:'symbols',kw:'green circle dot'},
+  {e:'🔵',cat:'symbols',kw:'blue circle dot'}, {e:'🟡',cat:'symbols',kw:'yellow circle dot'}, {e:'✨',cat:'symbols',kw:'sparkle magic new'},
+];
+let emojiGridBuilt = false, emojiActiveCat = 'smileys';
+function buildEmojiGrid(){
+  emojiGridBuilt = true;
+  const catsEl = document.getElementById('emojiCats');
+  catsEl.innerHTML = EMOJI_CATEGORIES.map(c=>`<button data-cat="${c.id}" class="${c.id===emojiActiveCat?'on':''}" title="${c.label}">${c.icon}</button>`).join('');
+  catsEl.querySelectorAll('button').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      emojiActiveCat = b.dataset.cat;
+      catsEl.querySelectorAll('button').forEach(x=>x.classList.remove('on'));
+      b.classList.add('on');
+      document.getElementById('emojiSearch').value = '';
+      renderEmojiGrid();
+    });
+  });
+  renderEmojiGrid();
+}
+function renderEmojiGrid(){
+  const query = document.getElementById('emojiSearch').value.trim().toLowerCase();
+  const grid = document.getElementById('emojiGrid');
+  const list = query
+    ? EMOJI_LIST.filter(x=> x.kw.includes(query) || x.e===query)
+    : EMOJI_LIST.filter(x=> x.cat===emojiActiveCat);
+  grid.innerHTML = list.map(x=>`<button data-emoji="${x.e}" title="Click to select">${x.e}</button>`).join('');
+  grid.querySelectorAll('button').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      armedInsert = {kind:'emoji', content:b.dataset.emoji};
+      updateInsertArmedBanner();
+    });
+  });
+}
+document.getElementById('emojiSearch').addEventListener('input', renderEmojiGrid);
+
+/* ---------- GIF search (GIPHY, bring-your-own-free-key) ---------- */
+function updateGifHintVisibility(){
+  const hasKey = !!settings.giphyKey;
+  document.getElementById('gifHint').style.display = hasKey ? 'none' : 'block';
+  document.getElementById('gifSearch').style.display = hasKey ? 'block' : 'none';
+  document.getElementById('gifGrid').style.display = hasKey ? 'grid' : 'none';
+}
+let gifSearchTimeout;
+document.getElementById('gifSearch').addEventListener('input', ()=>{
+  clearTimeout(gifSearchTimeout);
+  gifSearchTimeout = setTimeout(runGifSearch, 400);
+});
+async function runGifSearch(){
+  const q = document.getElementById('gifSearch').value.trim();
+  const grid = document.getElementById('gifGrid');
+  if(!settings.giphyKey || !q){ grid.innerHTML = ''; return; }
+  try{
+    const resp = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${encodeURIComponent(settings.giphyKey)}&q=${encodeURIComponent(q)}&limit=12&rating=g`);
+    const data = await resp.json();
+    if(!resp.ok) throw new Error((data.meta&&data.meta.msg) || 'GIF search failed');
+    grid.innerHTML = (data.data||[]).map(g=>`<img src="${g.images.fixed_height_small.url}" data-full="${g.images.original.url}" title="Click to select">`).join('');
+    grid.querySelectorAll('img').forEach(img=>{
+      img.addEventListener('click', ()=>{
+        armedInsert = {kind:'gif', content: img.dataset.full};
+        updateInsertArmedBanner();
+      });
+    });
+  }catch(err){
+    console.error('gif search failed', err);
+    toast('GIF search failed: ' + err.message);
+  }
 }
 
 /* ---------- Bookmark placement (single resume-point marker) ---------- */
@@ -3132,8 +3363,13 @@ function renderDrawer(){
     ...(current.stamps||[]).map(s=>({...s,kind:'stamp'}))
   ].sort((a,b)=> (a.created||a.start||0) - (b.created||b.start||0));
 
+  const bookmarkLocation = current.bookmark
+    ? (current.bookmark.page ? `Page ${current.bookmark.page}` : `${Math.round(current.progress||0)}% through`)
+    : '';
   const bookmarkHtml = current.bookmark
-    ? `<div class="bookmark-banner">🔖 <span>Bookmarked${current.bookmark.snippet?': "…'+escapeHtml(current.bookmark.snippet)+'…"':''}</span></div>`
+    ? `<div class="bookmark-banner" id="jumpToBookmark" style="cursor:pointer;" title="Click to jump to your bookmark">
+        🔖 <span>${bookmarkLocation}${current.bookmark.snippet?' — "…'+escapeHtml(current.bookmark.snippet)+'…"':''}</span>
+       </div>`
     : '';
 
   if(items.length===0 && !current.bookmark && (!current.drawings || current.drawings.length===0)){
@@ -3148,9 +3384,11 @@ function renderDrawer(){
         <div class="quote">"${escapeHtml(it.text||'')}"</div></div>`;
     }
     if(it.kind==='stamp'){
-      return `<div class="note-item"><span class="tag">Stamp
+      const label = it.kind==='gif' || it.icon.startsWith('http') ? 'GIF' : 'Emoji';
+      const preview = it.icon.startsWith('http') ? `<img src="${it.icon}" style="width:60px;border-radius:6px;">` : `<span style="font-size:16px;">${it.icon}</span>`;
+      return `<div class="note-item"><span class="tag">${label}
         <span class="drawer-del" data-stamp-del="${it.id}" style="float:right;color:var(--danger);cursor:pointer;">remove</span></span>
-        <div class="snippet" style="font-size:16px;">${it.icon}${it.page?' · p.'+it.page:''}</div></div>`;
+        <div class="snippet">${preview}${it.page?' · p.'+it.page:''}</div></div>`;
     }
     const label = it.highlightId ? 'Annotation' : 'Note';
     return `<div class="note-item"><span class="tag">${label}${it.page?' · p.'+it.page:''}
@@ -3171,6 +3409,16 @@ function renderDrawer(){
   list.innerHTML = bookmarkHtml + (itemsHtml + inkHtml || '<div class="drawer-empty">Nothing marked up yet.</div>');
 }
 document.getElementById('drawerList').addEventListener('click', (e)=>{
+  const jumpBtn = e.target.closest('#jumpToBookmark');
+  if(jumpBtn){
+    if(current.bookmark && current.bookmark.page){
+      goToPdfPage(current.bookmark.page);
+    } else {
+      const icon = document.querySelector('.bookmark-marker');
+      if(icon) icon.scrollIntoView({block:'center', behavior:'smooth'});
+    }
+    return;
+  }
   const inkClear = e.target.closest('[data-ink-clear-page]');
   if(inkClear){
     const page = parseInt(inkClear.dataset.inkClearPage);
