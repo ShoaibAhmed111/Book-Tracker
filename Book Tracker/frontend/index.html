@@ -223,6 +223,13 @@
   .stamp-marker:hover{ transform:scale(1.25); }
   .eraser-tool .stamp-marker:hover{ filter:brightness(.6); transform:scale(.9); }
 
+  .footnote-marker{
+    color:var(--signal); font-weight:700; font-size:0.7em; vertical-align:super; cursor:pointer;
+    margin-left:1px; transition:transform .12s, color .12s;
+  }
+  .footnote-marker:hover{ transform:scale(1.3); color:var(--violet); }
+  .eraser-tool .footnote-marker:hover{ color:var(--danger); transform:scale(.85); }
+
   .ink-canvas{ position:absolute; inset:0; pointer-events:none; z-index:3; touch-action:none; }
   .draw-active .ink-canvas{ pointer-events:auto; cursor:crosshair; }
   .eraser-tool .ink-canvas{ pointer-events:none; } /* erasing hit-tests via the page wrap, not the canvas */
@@ -633,7 +640,7 @@
     <div class="topbar">
       <div class="brand"><div class="brand-mark"></div><div class="brand-name">Book Tracker</div></div>
       <div class="topbar-right">
-        <div class="version-badge mono" id="versionBadge">v2.0.0</div>
+        <div class="version-badge mono" id="versionBadge">v2.1.0</div>
         <div id="googleSignInContainer"></div>
         <button class="google-btn" id="googleBtnFallback" style="display:none;">
           <span>Sign in with Google</span>
@@ -1391,6 +1398,11 @@ document.getElementById('fileInput').addEventListener('change', async (e)=>{
 });
 ['dragover','dragleave','drop'].forEach(evt=>{
   document.body.addEventListener(evt, e=>{
+    // Only react to an actual file being dragged in from outside the page —
+    // browsers make <img> elements natively draggable, so without this check
+    // dragging a GIF thumbnail from our own picker would falsely trigger the
+    // "drop your book" overlay and swallow the gesture.
+    if(!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return;
     e.preventDefault();
     if(evt==='dragover') document.getElementById('dropHint').classList.add('show');
     if(evt==='dragleave'||evt==='drop') document.getElementById('dropHint').classList.remove('show');
@@ -1407,7 +1419,7 @@ async function handleFile(file){
   if(!meta){
     meta = { id, title:file.name, ext, format, progress:0, lastOpened:Date.now(),
       currentPage:1, totalPages:1, scrollRatio:0, highlights:[], notes:[], stamps:[], drawings:[], bookmark:null,
-      whiteboard:null, hasFile:true };
+      footnotes:[], footnoteCounter:0, whiteboard:null, hasFile:true };
   } else {
     meta.lastOpened = Date.now();
     meta.hasFile = true;
@@ -1512,6 +1524,7 @@ async function openBook(meta, file){
     reapplyTextHighlights(inner, meta.highlights);
     reapplyStamps(inner, null);
     reapplyBookmark(inner, null);
+    reapplyFootnotes(inner, null);
     attachTextTracking(inner.parentElement, inner);
     attachSelectionHandlers(inner);
     currentDoc = {type:'text'};
@@ -1819,6 +1832,7 @@ async function renderPdfPageInto(wrap, num){
   reapplyPdfHighlights(textLayerDiv, num);
   reapplyStamps(textLayerDiv, num);
   reapplyBookmark(textLayerDiv, num);
+  reapplyFootnotes(textLayerDiv, num);
   attachSelectionHandlers(textLayerDiv, num);
 
   const inkCanvas = document.createElement('canvas');
@@ -2472,6 +2486,7 @@ function attachSelectionHandlers(container, pdfPage){
       if(sel.isCollapsed){
         if(tool==='bookmark'){ placeBookmark(range, container, pdfPage); }
         else if(tool==='annotate' && (annotateMode==='emoji'||annotateMode==='gif') && armedInsert){ placeStamp(range, container, pdfPage); }
+        else if(tool==='annotate' && annotateMode==='comment'){ placeFootnote(range, container, pdfPage); }
         return;
       }
 
@@ -2531,6 +2546,42 @@ function startAnnotation(range, container, pdfPage){
   showNoteCompose(rect, hostRect);
 }
 
+/* ---------- Footnote pointer (Text mode, click with no selection) ----------
+   Inserts a small superscript number directly into the document at the
+   clicked point — like "intelligent¹" — and links it to a note. Unlike
+   Comment mode (which requires selecting a passage first), this lets you
+   drop a reference marker at an exact spot with nothing selected. */
+function placeFootnote(range, container, pdfPage){
+  const offset = textOffsetOf(container, range.startContainer, range.startOffset);
+  current.footnoteCounter = (current.footnoteCounter||0) + 1;
+  const num = current.footnoteCounter;
+  const id = 'fn'+Date.now();
+  const marker = document.createElement('span');
+  marker.className = 'footnote-marker';
+  marker.dataset.hlId = id;
+  marker.textContent = num;
+  try{ range.insertNode(marker); }catch(e){
+    current.footnoteCounter--;
+    toast('Couldn\'t place a pointer there — try clicking directly on a word.');
+    return;
+  }
+  const hostRect = document.getElementById('viewerHost').getBoundingClientRect();
+  const rect = marker.getBoundingClientRect();
+  pendingNoteAnchor = { range:{start:offset}, text:'', container, pdfPage, footnoteId:id, footnoteNum:num };
+  showNoteCompose(rect, hostRect);
+}
+function reapplyFootnotes(container, pdfPageNum){
+  (current.footnotes||[]).filter(f => (f.page||null)===(pdfPageNum||null)).forEach(f=>{
+    const r = buildRangeFromOffsets(container, f.start, f.start);
+    if(!r) return;
+    const marker = document.createElement('span');
+    marker.className = 'footnote-marker';
+    marker.dataset.hlId = f.id;
+    marker.textContent = f.num;
+    try{ r.insertNode(marker); }catch(e){}
+  });
+}
+
 /* ---------- Stamp placement (Zoom-style quick icon annotation) ---------- */
 function buildStampNode(record){
   if(record.kind==='gif'){
@@ -2539,6 +2590,7 @@ function buildStampNode(record){
     img.src = record.icon;
     img.dataset.stampId = record.id;
     img.title = 'Click to remove';
+    img.draggable = false;
     return img;
   }
   const span = document.createElement('span');
@@ -2672,6 +2724,19 @@ function eraseAtPoint(clientX, clientY){
     if(record) eraseSessionLog.push({kind:'highlight', record:{...record}, linkedNote: linkedNote?{...linkedNote}:null, container});
     return true;
   }
+  const footnote = el.closest('.footnote-marker');
+  if(footnote){
+    const id = footnote.dataset.hlId;
+    const record = (current.footnotes||[]).find(f=>f.id===id);
+    const linkedNote = (current.notes||[]).find(n=>n.highlightId===id);
+    const container = footnote.closest('#textInner') || footnote.closest('.textLayer');
+    current.footnotes = (current.footnotes||[]).filter(f=>f.id!==id);
+    current.notes = (current.notes||[]).filter(n=>n.highlightId!==id);
+    footnote.remove();
+    saveMeta(); renderDrawer();
+    if(record) eraseSessionLog.push({kind:'footnote', record:{...record}, linkedNote: linkedNote?{...linkedNote}:null, container});
+    return true;
+  }
   const stamp = el.closest('.stamp-marker');
   if(stamp){
     const id = stamp.dataset.stampId;
@@ -2733,15 +2798,24 @@ function undoLastErase(){
       current.stamps.push(item.record);
       const r = buildRangeFromOffsets(item.container, item.record.start, item.record.start);
       if(r){
-        const icon = document.createElement('span');
-        icon.className = 'stamp-marker'; icon.textContent = item.record.icon;
-        icon.dataset.stampId = item.record.id; icon.title = 'Click to remove';
-        try{ r.insertNode(icon); }catch(e){}
+        const node = buildStampNode(item.record.kind ? item.record : {...item.record, kind:'emoji'});
+        try{ r.insertNode(node); }catch(e){}
       }
     } else if(item.kind==='bookmark' && item.container){
       current.bookmark = item.record;
       reapplyBookmark(item.container, item.record.page||null);
       recomputeProgressFromBookmark();
+    } else if(item.kind==='footnote' && item.container){
+      current.footnotes = current.footnotes||[];
+      current.footnotes.push(item.record);
+      const r = buildRangeFromOffsets(item.container, item.record.start, item.record.start);
+      if(r){
+        const marker = document.createElement('span');
+        marker.className = 'footnote-marker'; marker.textContent = item.record.num;
+        marker.dataset.hlId = item.record.id;
+        try{ r.insertNode(marker); }catch(e){}
+      }
+      if(item.linkedNote){ current.notes = current.notes||[]; current.notes.push(item.linkedNote); }
     } else if(item.kind==='drawing'){
       current.drawings = current.drawings||[];
       current.drawings.push(item.record);
@@ -2900,7 +2974,7 @@ async function runGifSearch(){
     const resp = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${encodeURIComponent(settings.giphyKey)}&q=${encodeURIComponent(q)}&limit=12&rating=g`);
     const data = await resp.json();
     if(!resp.ok) throw new Error((data.meta&&data.meta.msg) || 'GIF search failed');
-    grid.innerHTML = (data.data||[]).map(g=>`<img src="${g.images.fixed_height_small.url}" data-full="${g.images.original.url}" title="Click to select">`).join('');
+    grid.innerHTML = (data.data||[]).map(g=>`<img src="${g.images.fixed_height_small.url}" data-full="${g.images.original.url}" title="Click to select" draggable="false">`).join('');
     grid.querySelectorAll('img').forEach(img=>{
       img.addEventListener('click', ()=>{
         armedInsert = {kind:'gif', content: img.dataset.full};
@@ -3090,6 +3164,10 @@ document.getElementById('noteCancel').addEventListener('click', ()=>{
   if(pendingNoteAnchor && pendingNoteAnchor.annotationMarkId){
     unwrapMarkById(pendingNoteAnchor.annotationMarkId); // no note written — don't leave an orphan mark
   }
+  if(pendingNoteAnchor && pendingNoteAnchor.footnoteId){
+    document.querySelectorAll(`.footnote-marker[data-hl-id="${pendingNoteAnchor.footnoteId}"]`).forEach(m=>m.remove());
+    current.footnoteCounter--; // give the number back since nothing was saved
+  }
   pendingNoteAnchor = null;
   editingNoteId = null;
 });
@@ -3108,6 +3186,10 @@ document.getElementById('noteSave').addEventListener('click', ()=>{
 
   if(!text){
     if(pendingNoteAnchor && pendingNoteAnchor.annotationMarkId) unwrapMarkById(pendingNoteAnchor.annotationMarkId);
+    if(pendingNoteAnchor && pendingNoteAnchor.footnoteId){
+      document.querySelectorAll(`.footnote-marker[data-hl-id="${pendingNoteAnchor.footnoteId}"]`).forEach(m=>m.remove());
+      current.footnoteCounter--;
+    }
     document.getElementById('noteCompose').classList.remove('show');
     pendingNoteAnchor = null;
     return;
@@ -3138,14 +3220,25 @@ document.getElementById('noteSave').addEventListener('click', ()=>{
       m.addEventListener('animationend', ()=>m.classList.remove('hl-flash'), {once:true});
     });
   }
+  if(pendingNoteAnchor.footnoteId){
+    record.highlightId = pendingNoteAnchor.footnoteId;
+    record.quote = ''; // no surrounding selected text for a click-placed pointer
+    current.footnotes = current.footnotes||[];
+    current.footnotes.push({ id:pendingNoteAnchor.footnoteId, num:pendingNoteAnchor.footnoteNum, start:pendingNoteAnchor.range.start, page:pendingNoteAnchor.pdfPage||null, created:Date.now() });
+    document.querySelectorAll(`.footnote-marker[data-hl-id="${pendingNoteAnchor.footnoteId}"]`).forEach(m=>{
+      m.classList.add('hl-flash');
+      m.addEventListener('animationend', ()=>m.classList.remove('hl-flash'), {once:true});
+    });
+  }
 
   current.notes = current.notes||[];
   current.notes.push(record);
+  const wasFootnote = !!pendingNoteAnchor.footnoteId;
   saveMeta(); renderDrawer();
   document.getElementById('noteCompose').classList.remove('show');
   pendingNoteAnchor = null;
   window.getSelection().removeAllRanges();
-  toast(record.highlightId ? 'Annotation saved' : 'Note saved');
+  toast(wasFootnote ? 'Pointer added' : record.highlightId ? 'Annotation saved' : 'Note saved');
 });
 function unwrapMarkById(id){
   document.querySelectorAll(`mark[data-hl-id="${id}"]`).forEach(mark=>{
@@ -3310,9 +3403,9 @@ function renderImageHighlights(){
 }
 
 /* ============ HIGHLIGHT REMOVAL (click a highlight to delete it) ============ */
-let activeHlId = null;
+let activeHlId = null, activeHlKind = 'highlight';
 document.addEventListener('click', (e)=>{
-  const mark = e.target.closest('mark[data-hl-id]');
+  const mark = e.target.closest('mark[data-hl-id]') || e.target.closest('.footnote-marker[data-hl-id]');
   const pop = document.getElementById('hlRemovePop');
   if(!mark){
     if(!e.target.closest('#hlRemovePop')) pop.classList.remove('show');
@@ -3322,6 +3415,7 @@ document.addEventListener('click', (e)=>{
   const sel = window.getSelection();
   if(sel && !sel.isCollapsed) return; // this click was the end of a drag-selection, not a tap
   activeHlId = mark.dataset.hlId;
+  activeHlKind = mark.classList.contains('footnote-marker') ? 'footnote' : 'highlight';
   const hostRect = document.getElementById('viewerHost').getBoundingClientRect();
   const r = mark.getBoundingClientRect();
   pop.style.left = (r.left - hostRect.left) + 'px';
@@ -3334,7 +3428,12 @@ document.addEventListener('click', (e)=>{
 });
 document.getElementById('hlRemoveBtn').addEventListener('click', ()=>{
   if(!activeHlId) return;
-  removeHighlight(activeHlId);
+  if(activeHlKind==='footnote'){
+    current.footnotes = (current.footnotes||[]).filter(f=>f.id!==activeHlId);
+    document.querySelectorAll(`.footnote-marker[data-hl-id="${activeHlId}"]`).forEach(el=>el.remove());
+  } else {
+    removeHighlight(activeHlId);
+  }
   current.notes = (current.notes||[]).filter(n=>n.highlightId!==activeHlId);
   saveMeta(); renderDrawer();
   document.getElementById('hlRemovePop').classList.remove('show');
@@ -3390,7 +3489,7 @@ function renderDrawer(){
         <span class="drawer-del" data-stamp-del="${it.id}" style="float:right;color:var(--danger);cursor:pointer;">remove</span></span>
         <div class="snippet">${preview}${it.page?' · p.'+it.page:''}</div></div>`;
     }
-    const label = it.highlightId ? 'Annotation' : 'Note';
+    const label = it.highlightId ? (it.highlightId.startsWith('fn') ? 'Pointer' : 'Annotation') : 'Note';
     return `<div class="note-item"><span class="tag">${label}${it.page?' · p.'+it.page:''}
       <span class="drawer-edit" data-note-edit="${it.id}" style="float:right;color:var(--signal);cursor:pointer;margin-left:10px;">edit</span>
       <span class="drawer-del" data-note-del="${it.id}" ${it.highlightId?`data-hl-del="${it.highlightId}"`:''} style="float:right;color:var(--danger);cursor:pointer;">remove</span></span>
